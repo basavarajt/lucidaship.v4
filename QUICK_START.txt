@@ -1,0 +1,172 @@
+# 🎯 QUICK START: Frontend + Backend
+
+## The 2-Terminal Setup
+
+### ✅ Terminal 1: Backend (FastAPI)
+```bash
+cd /workspaces/lucidaanalytics-v3.0/apps/backend
+source .venv/bin/activate
+pip install -q -r requirements.txt
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+**You should see:**
+```
+INFO:     Uvicorn running on http://0.0.0.0:8000
+INFO:     Application startup complete
+Press CTRL+C to quit
+```
+
+---
+
+### ✅ Terminal 2: Frontend (React + Vite)
+```bash
+cd /workspaces/lucidaanalytics-v3.0/apps/frontend
+npm run dev
+```
+
+**You should see:**
+```
+  VITE v5.X.X  ready in XXX ms
+
+  ➜  Local:   http://127.0.0.1:5173/
+  ➜  press h to show help
+```
+
+---
+
+## 📍 Access Points
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| **Frontend** | http://localhost:5173 | React UI |
+| **API Docs** | http://localhost:8000/docs | Swagger UI |
+| **Health** | http://localhost:8000/health | API alive |
+
+---
+
+## ✨ What Works
+
+### Frontend (React)
+- ✅ Dashboard page
+- ✅ Upload CSV interface
+- ✅ Training flow
+- ✅ Scoring display
+- ✅ Academy page
+- ✅ Authentication components
+
+### Backend (FastAPI)
+- ✅ CSV upload endpoint
+- ✅ Model training endpoint
+- ✅ Scoring endpoint
+- ✅ Database integration
+- ✅ Authentication middleware
+- ✅ Explanation module
+
+---
+
+## 🧪 Quick Test
+
+### Test 1: Frontend Loads
+```
+Open: http://localhost:5173
+Expected: React UI renders without CORS errors
+```
+
+### Test 2: Backend API Works
+```bash
+curl http://localhost:8000/health
+Expected: 200 OK (or similar response)
+```
+
+### Test 3: API Docs Available
+```
+Open: http://localhost:8000/docs
+Expected: Swagger UI with all endpoints listed
+```
+
+### Test 4: Can Upload CSV
+```
+1. Go to http://localhost:5173
+2. Click "Upload CSV"
+3. Select test file
+4. Should show data preview
+5. Should allow training
+```
+
+---
+
+## 📊 Performance
+
+| Metric | Expected |
+|--------|----------|
+| Frontend load | <2 seconds |
+| API response | <500ms |
+| Dashboard render | <1 second |
+| CSV upload | varies by size |
+
+---
+
+## 🛠️ If Something Breaks
+
+### Frontend won't load
+```bash
+# Check backend is running
+curl http://localhost:8000/health
+
+# Rebuild frontend
+cd apps/frontend
+npm install
+npm run dev
+```
+
+### CORS errors in console
+```
+✓ Backend should allow: http://localhost:5173
+✓ Check: .env CORS_ORIGINS setting
+✓ Restart backend if changed
+```
+
+### Dependencies error
+```bash
+# Backend
+cd apps/backend
+source .venv/bin/activate
+pip install -r requirements.txt --upgrade
+
+# Frontend
+cd apps/frontend
+npm install --force
+npm run dev
+```
+
+### Port already in use
+```bash
+# Kill process on port 8000
+lsof -ti:8000 | xargs kill -9
+
+# Kill process on port 5173
+lsof -ti:5173 | xargs kill -9
+```
+
+---
+
+## 🚀 Next: Unsupervised Ranking Engine
+
+Once both are running:
+
+1. **Verify integration works** ✓
+2. **Begin implementation** (Week 1)
+   - Create `lucida_unsupervised_ranking_engine.py`
+   - Copy class definitions from skeleton
+   - Write unit tests
+3. **Integrate into scoring** (Week 2-3)
+4. **Enhance UI** (Week 4)
+5. **File patent** (Week 16)
+
+See: `FULL_STACK_STARTUP_GUIDE.md` for detailed instructions
+
+---
+
+**Ready?** Start Terminal 1 with backend, then Terminal 2 with frontend!
+

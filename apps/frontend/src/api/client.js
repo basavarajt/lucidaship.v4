@@ -29,11 +29,11 @@ export const authApi = {
 };
 
 export const scoringApi = {
-  train: async (modelName, files, targetCol = null) => {
+  train: async (modelName, files, targetCol = null, mode = "supervised") => {
     const formData = new FormData();
     files.forEach((f) => formData.append('files', f));
 
-    let url = `/train?model_name=${encodeURIComponent(modelName)}`;
+    let url = `/train?model_name=${encodeURIComponent(modelName)}&mode=${encodeURIComponent(mode)}`;
     if (targetCol) url += `&target_column=${encodeURIComponent(targetCol)}`;
 
     const response = await client.post(url, formData, {

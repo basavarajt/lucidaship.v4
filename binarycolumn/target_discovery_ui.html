@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lead Scoring — Target Setup</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0f0f13;
+      --bg2: #16161d;
+      --bg3: #1e1e28;
+      --border: rgba(255,255,255,0.08);
+      --text: #e8e6f0;
+      --text2: #9b97b0;
+      --purple: #7c6ff7;
+      --teal: #2dd4bf;
+      --coral: #f87171;
+      --amber: #fbbf24;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem;
+      margin-bottom: 1.5rem;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+    .subtitle {
+      color: var(--text2);
+      font-size: 15px;
+      margin-bottom: 2rem;
+    }
+    .upload-zone {
+      border: 2px dashed var(--border);
+      border-radius: 10px;
+      padding: 2.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: rgba(124, 111, 247, 0.04);
+    }
+    .upload-zone:hover {
+      border-color: var(--purple);
+      background: rgba(124, 111, 247, 0.08);
+    }
+    .upload-zone.active {
+      border-color: var(--purple);
+      background: rgba(124, 111, 247, 0.12);
+    }
+    .upload-icon {
+      font-size: 40px;
+      margin-bottom: 1rem;
+    }
+    .upload-text {
+      font-size: 15px;
+      font-weight: 500;
+      margin-bottom: 0.5rem;
+    }
+    .upload-hint {
+      font-size: 13px;
+      color: var(--text2);
+    }
+    input[type="file"] {
+      display: none;
+    }
+    .phase {
+      display: none;
+    }
+    .phase.active {
+      display: block;
+    }
+    .loading {
+      text-align: center;
+      padding: 2rem;
+    }
+    .spinner {
+      border: 3px solid var(--bg3);
+      border-top: 3px solid var(--purple);
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 1rem;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .options-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .option-card {
+      background: var(--bg3);
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      padding: 1.5rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+    }
+    .option-card:hover {
+      border-color: var(--purple);
+      background: rgba(124, 111, 247, 0.08);
+      transform: translateY(-2px);
+    }
+    .option-card.selected {
+      border-color: var(--purple);
+      background: rgba(124, 111, 247, 0.15);
+      box-shadow: 0 0 20px rgba(124, 111, 247, 0.2);
+    }
+    .option-icon {
+      font-size: 36px;
+      margin-bottom: 0.8rem;
+    }
+    .option-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: var(--text);
+    }
+    .option-desc {
+      font-size: 12px;
+      color: var(--text2);
+      line-height: 1.5;
+    }
+    .stats-preview {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .stat {
+      text-align: center;
+    }
+    .stat-num {
+      font-size: 26px;
+      font-weight: 600;
+      color: var(--purple);
+      margin-bottom: 0.3rem;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: var(--text2);
+    }
+    .data-preview {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: 'Monaco', monospace;
+      font-size: 12px;
+      color: #c4b5fd;
+      overflow-x: auto;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .button-group {
+      display: flex;
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+    button {
+      flex: 1;
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: 'DM Sans', sans-serif;
+    }
+    .btn-primary {
+      background: var(--purple);
+      color: white;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: #8b7aff;
+    }
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn-secondary {
+      background: var(--bg3);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover {
+      border-color: var(--purple);
+      background: rgba(124, 111, 247, 0.08);
+    }
+    .success-message {
+      background: rgba(45, 212, 191, 0.1);
+      border: 1px solid rgba(45, 212, 191, 0.3);
+      border-radius: 8px;
+      padding: 1rem;
+      color: var(--teal);
+      margin-bottom: 1rem;
+      font-size: 14px;
+    }
+    .error-message {
+      background: rgba(248, 113, 113, 0.1);
+      border: 1px solid rgba(248, 113, 113, 0.3);
+      border-radius: 8px;
+      padding: 1rem;
+      color: var(--coral);
+      margin-bottom: 1rem;
+      font-size: 14px;
+    }
+    .info-box {
+      background: rgba(96, 165, 250, 0.1);
+      border-left: 3px solid #60a5fa;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+      font-size: 14px;
+      color: var(--text2);
+    }
+    .checkmark {
+      color: var(--teal);
+      font-weight: 600;
+      margin-right: 0.5rem;
+    }
+    @media (max-width: 600px) {
+      .card {
+        padding: 1.5rem;
+      }
+      h1 {
+        font-size: 22px;
+      }
+      .options-grid {
+        grid-template-columns: 1fr;
+      }
+      .button-group {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- PHASE 1: UPLOAD -->
+    <div class="phase active" id="phase-upload">
+      <div class="card">
+        <h1>Lead Scoring Setup</h1>
+        <p class="subtitle">Upload your CRM export to get started</p>
+
+        <div class="upload-zone" id="uploadZone">
+          <div class="upload-icon">📁</div>
+          <div class="upload-text">Drag CSV here or click to select</div>
+          <div class="upload-hint">Any format: Salesforce, HubSpot, custom CSV — we handle them all</div>
+          <input type="file" id="csvFile" accept=".csv" />
+        </div>
+      </div>
+    </div>
+
+    <!-- PHASE 2: ANALYZING -->
+    <div class="phase" id="phase-analyzing">
+      <div class="card">
+        <div class="loading">
+          <div class="spinner"></div>
+          <p>Analyzing your data...</p>
+          <p style="font-size: 13px; color: var(--text2); margin-top: 0.5rem;">Detecting columns, checking for targets</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- PHASE 3: TARGET FOUND (existing target in CSV) -->
+    <div class="phase" id="phase-target-found">
+      <div class="card">
+        <div class="success-message">
+          <span class="checkmark">✓</span>
+          We found a target column in your data!
+        </div>
+        <h1>Ready to Score Leads</h1>
+        <p class="subtitle" id="targetFoundMsg"></p>
+
+        <div class="stats-preview" id="targetStatsPreview"></div>
+
+        <div class="button-group">
+          <button class="btn-primary" onclick="proceedToTraining()">Proceed to Training</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PHASE 4: CHOOSE TARGET (no existing target) -->
+    <div class="phase" id="phase-choose-target">
+      <div class="card">
+        <h1>How Should We Rank Your Leads?</h1>
+        <p class="subtitle">No conversion column detected. Pick a ranking method:</p>
+
+        <div class="info-box">
+          💡 We'll automatically create a ranking based on your choice. Top 50% of leads = high priority, bottom 50% = lower priority.
+        </div>
+
+        <div class="stats-preview">
+          <div class="stats-grid">
+            <div class="stat">
+              <div class="stat-num" id="csvRowCount">—</div>
+              <div class="stat-label">Leads</div>
+            </div>
+            <div class="stat">
+              <div class="stat-num" id="csvColCount">—</div>
+              <div class="stat-label">Columns</div>
+            </div>
+            <div class="stat">
+              <div class="stat-num" id="csvNumericCount">—</div>
+              <div class="stat-label">Numeric</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="optionsContainer" class="options-grid"></div>
+
+        <div id="dataPreviewLabel" style="margin-top: 2rem; margin-bottom: 0.5rem; font-weight: 600;">Data Preview:</div>
+        <div class="data-preview" id="dataPreview"></div>
+
+        <div class="button-group" style="margin-top: 1.5rem;">
+          <button class="btn-secondary" onclick="goBack()">Back</button>
+          <button class="btn-primary" onclick="submitChoice()" id="submitBtn" disabled>
+            Confirm & Continue
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PHASE 5: SUCCESS -->
+    <div class="phase" id="phase-success">
+      <div class="card">
+        <div class="success-message">
+          <span class="checkmark">✓</span>
+          Your ranking is ready!
+        </div>
+        <h1>Target Created</h1>
+        <p class="subtitle" id="successMsg"></p>
+
+        <div class="stats-preview">
+          <div class="stats-grid">
+            <div class="stat">
+              <div class="stat-num" id="finalRowCount">—</div>
+              <div class="stat-label">Leads</div>
+            </div>
+            <div class="stat">
+              <div class="stat-num" id="finalHighPriority">—</div>
+              <div class="stat-label">High Priority</div>
+            </div>
+            <div class="stat">
+              <div class="stat-num" id="finalLowPriority">—</div>
+              <div class="stat-label">Lower Priority</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="info-box">
+          Your data is now ready for ML training. The model will learn to identify high-priority leads using the ranking you selected.
+        </div>
+
+        <div class="button-group">
+          <button class="btn-primary" onclick="downloadAndTrain()">Download & Train Model</button>
+          <button class="btn-secondary" onclick="sendToAPI()">Send to Backend API</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PHASE 6: ERROR -->
+    <div class="phase" id="phase-error">
+      <div class="card">
+        <div class="error-message" id="errorMsg"></div>
+        <div class="button-group">
+          <button class="btn-secondary" onclick="location.reload()">Try Again</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let state = {
+      file: null,
+      csvData: null,
+      selectedOption: null,
+      targetInfo: null,
+      discoveryResult: null
+    };
+
+    // =====================================================================
+    // UPLOAD HANDLING
+    // =====================================================================
+
+    const uploadZone = document.getElementById('uploadZone');
+    const csvInput = document.getElementById('csvFile');
+
+    uploadZone.addEventListener('click', () => csvInput.click());
+    uploadZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadZone.classList.add('active');
+    });
+    uploadZone.addEventListener('dragleave', () => {
+      uploadZone.classList.remove('active');
+    });
+    uploadZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadZone.classList.remove('active');
+      const files = e.dataTransfer.files;
+      if (files.length) handleFile(files[0]);
+    });
+
+    csvInput.addEventListener('change', (e) => {
+      if (e.target.files.length) handleFile(e.target.files[0]);
+    });
+
+    async function handleFile(file) {
+      if (!file.name.endsWith('.csv')) {
+        showError('Please select a CSV file');
+        return;
+      }
+
+      state.file = file;
+      showPhase('phase-analyzing');
+
+      // Simulate analysis with actual CSV parsing
+      await new Promise(r => setTimeout(r, 1000));
+
+      const text = await file.text();
+      const { data, meta } = parseCSV(text);
+      
+      if (!data.length) {
+        showError('CSV is empty or invalid');
+        return;
+      }
+
+      state.csvData = data;
+      await analyzeData(data, meta);
+    }
+
+    function parseCSV(text) {
+      const lines = text.trim().split('\n');
+      if (!lines.length) return { data: [], meta: {} };
+
+      const headers = parseCSVLine(lines[0]);
+      const data = lines.slice(1).map(line => {
+        const values = parseCSVLine(line);
+        const obj = {};
+        headers.forEach((h, i) => {
+          obj[h] = values[i] ? values[i].trim() : '';
+        });
+        return obj;
+      }).filter(row => Object.values(row).some(v => v)); // Remove empty rows
+
+      const numericCols = headers.filter(h => {
+        return data.every(row => !row[h] || !isNaN(row[h]));
+      });
+
+      return {
+        data,
+        meta: {
+          headers,
+          rowCount: data.length,
+          colCount: headers.length,
+          numericCount: numericCols.length,
+          numericCols
+        }
+      };
+    }
+
+    // Handle quoted CSV fields properly
+    function parseCSVLine(line) {
+      const result = [];
+      let current = '';
+      let insideQuotes = false;
+
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        const nextChar = line[i + 1];
+
+        if (char === '"') {
+          if (insideQuotes && nextChar === '"') {
+            current += '"';
+            i++;
+          } else {
+            insideQuotes = !insideQuotes;
+          }
+        } else if (char === ',' && !insideQuotes) {
+          result.push(current.trim());
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+
+      result.push(current.trim());
+      return result;
+    }
+
+    async function analyzeData(data, meta) {
+      // Call backend to detect target
+      // For now, simulate: 50/50 chance of finding a target
+      
+      const hasTarget = Math.random() > 0.5; // Demo logic
+
+      if (hasTarget) {
+        showPhase('phase-target-found');
+        document.getElementById('targetFoundMsg').textContent = 
+          'Found "Status" column with conversion outcomes. Ready to proceed!';
+      } else {
+        // Show options
+        showPhase('phase-choose-target');
+        
+        // Update stats
+        document.getElementById('csvRowCount').textContent = meta.rowCount;
+        document.getElementById('csvColCount').textContent = meta.colCount;
+        document.getElementById('csvNumericCount').textContent = meta.numericCount;
+
+        // Generate options based on CSV structure
+        const options = generateOptions(data, meta);
+        renderOptions(options);
+
+        // Show preview
+        const preview = generatePreview(data.slice(0, 3));
+        document.getElementById('dataPreview').innerHTML = preview;
+      }
+    }
+
+    function generateOptions(data, meta) {
+      const options = [];
+
+      // Option 1: Rank by highest numeric column
+      if (meta.numericCols.length > 0) {
+        const col = meta.numericCols[0];
+        options.push({
+          id: 1,
+          icon: '📈',
+          title: `High ${col}`,
+          desc: `Rank by ${col} — highest values = best leads`,
+          type: 'numeric'
+        });
+      }
+
+      // Option 2: Most active (if engagement-like columns)
+      const engagementCols = meta.headers.filter(h => 
+        /email|call|touch|contact|interaction|activity/i.test(h)
+      );
+      if (engagementCols.length > 0) {
+        options.push({
+          id: 2,
+          icon: '🎯',
+          title: 'Most Active',
+          desc: 'Rank by total engagement (emails, calls, touches)',
+          type: 'engagement'
+        });
+      }
+
+      // Option 3: Composite score
+      if (meta.numericCount >= 2) {
+        options.push({
+          id: 3,
+          icon: '⚡',
+          title: 'Composite Score',
+          desc: 'Mix of all numeric signals — balanced ranking',
+          type: 'composite'
+        });
+      }
+
+      // Option 4: Profile quality
+      options.push({
+        id: 4,
+        icon: '⭐',
+        title: 'Profile Quality',
+        desc: 'Rank by completeness & data richness',
+        type: 'quality'
+      });
+
+      // Option 5: Random split (testing)
+      options.push({
+        id: 5,
+        icon: '🎲',
+        title: 'Random Split',
+        desc: 'Simple 50/50 split (for testing)',
+        type: 'random'
+      });
+
+      return options;
+    }
+
+    function renderOptions(options) {
+      const container = document.getElementById('optionsContainer');
+      container.innerHTML = options.map(opt => `
+        <div class="option-card" onclick="selectOption(${opt.id}, this)">
+          <div class="option-icon">${opt.icon}</div>
+          <div class="option-title">${opt.title}</div>
+          <div class="option-desc">${opt.desc}</div>
+        </div>
+      `).join('');
+    }
+
+    function selectOption(id, element) {
+      document.querySelectorAll('.option-card').forEach(e => {
+        e.classList.remove('selected');
+      });
+      element.classList.add('selected');
+      state.selectedOption = id;
+      document.getElementById('submitBtn').disabled = false;
+    }
+
+    function generatePreview(rows) {
+      if (!rows.length) return 'No data';
+      const headers = Object.keys(rows[0]);
+      const maxWidth = 14;  // Increased width for better readability
+      const maxRows = 6;     // Show more rows
+
+      let html = '<pre style="font-size: 11px; line-height: 1.5; letter-spacing: 0.5px;">';
+      html += '<strong>Preview (first ' + Math.min(maxRows, rows.length) + ' rows)</strong>\n';
+      html += '\n';
+
+      // Header row
+      const headerRow = headers
+        .map(h => h.substring(0, maxWidth - 2).padEnd(maxWidth))
+        .join(' │ ');
+      html += headerRow + '\n';
+      
+      // Separator
+      const sepWidth = headers.length * (maxWidth + 3);
+      html += '─'.repeat(Math.min(sepWidth, 120)) + '\n';
+
+      // Data rows
+      rows.slice(0, maxRows).forEach((row, idx) => {
+        const vals = headers.map(h => {
+          const val = (row[h] !== undefined && row[h] !== null) ? row[h] : '(empty)';
+          const strVal = String(val).trim();
+          // Truncate with ellipsis if too long
+          if (strVal.length > maxWidth - 2) {
+            return strVal.substring(0, maxWidth - 3) + '…';
+          }
+          return strVal.padEnd(maxWidth);
+        });
+        html += vals.join(' │ ');
+        if (idx < Math.min(maxRows, rows.length) - 1) html += '\n';
+      });
+
+      if (rows.length > maxRows) {
+        html += '\n... and ' + (rows.length - maxRows) + ' more rows ...';
+      }
+
+      html += '</pre>';
+      return html;
+    }
+
+    async function submitChoice() {
+      if (!state.selectedOption) return;
+
+      showPhase('phase-analyzing');
+      await new Promise(r => setTimeout(r, 1000));
+
+      // Simulate creating synthetic target
+      const rowCount = state.csvData.length;
+      const highCount = Math.ceil(rowCount * 0.5);
+      const lowCount = rowCount - highCount;
+
+      state.targetInfo = {
+        totalLeads: rowCount,
+        highPriority: highCount,
+        lowPriority: lowCount,
+        option: state.selectedOption,
+        conversionRate: ((highCount / rowCount) * 100).toFixed(1)
+      };
+
+      showPhase('phase-success');
+      document.getElementById('successMsg').textContent = 
+        `Created ranking based on option ${state.selectedOption}. ${highCount} leads marked as high priority.`;
+      document.getElementById('finalRowCount').textContent = rowCount;
+      document.getElementById('finalHighPriority').textContent = highCount;
+      document.getElementById('finalLowPriority').textContent = lowCount;
+    }
+
+    function proceedToTraining() {
+      showPhase('phase-success');
+    }
+
+    function goBack() {
+      showPhase('phase-upload');
+      state = { file: null, csvData: null, selectedOption: null };
+    }
+
+    async function downloadAndTrain() {
+      console.log('Download & train:', state);
+      alert('✓ CSV with __target__ column will be saved.\n\nThen you run the Python pipeline:\nload_leads() → feature engineering → training\n\nNo changes needed!');
+    }
+
+    async function sendToAPI() {
+      console.log('Send to backend:', state);
+      alert('✓ Sending to backend API at /api/score\n\nBackend receives:\n1. Your CSV with __target__ column\n2. Load through existing pipeline\n3. Returns scored leads');
+    }
+
+    function showError(msg) {
+      document.getElementById('errorMsg').innerHTML = `<strong>Error:</strong> ${msg}`;
+      showPhase('phase-error');
+    }
+
+    function showPhase(name) {
+      document.querySelectorAll('.phase').forEach(p => p.classList.remove('active'));
+      document.getElementById(name).classList.add('active');
+    }
+  </script>
+</body>
+</html>

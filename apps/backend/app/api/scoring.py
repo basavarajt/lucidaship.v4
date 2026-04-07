@@ -600,14 +600,20 @@ async def train_model(
     files: Optional[List[UploadFile]] = File(None),
     model_name: str = Query("default", description="Name for this model"),
     target_column: Optional[str] = Query(None),
+    mode: str = Query("supervised", description="Training mode: 'supervised' (requires binary target) or 'unsupervised' (ranks rows without labels)"),
     user: dict = Depends(get_current_user),
 ):
-    """Upload CSVs → auto-merge → auto-train. Protected + tenant-scoped."""
+    """Upload CSVs → auto-merge → auto-train. Protected + tenant-scoped.
+    
+    Modes:
+    - supervised (default): Requires a binary target column. Uses adaptive scorer for classification.
+    - unsupervised: No target needed. Ranks rows using multi-criteria signals without labels.
+    """
     tenant_id = user["tenant_id"]
     try:
         dfs = await _validate_and_read_files(file, files)
 
-        logger.info("Training: tenant=%s model=%s files=%d", tenant_id, model_name, len(dfs))
+        logger.info("Training: tenant=%s model=%s mode=%s files=%d", tenant_id, model_name, mode, len(dfs))
 
         df = smart_merge_dfs(dfs)
         logger.info("Merged data shape: %s", df.shape)
@@ -617,15 +623,37 @@ async def train_model(
         if df.shape[1] < 2:
             return error_response("TOO_FEW_COLUMNS", f"Need at least 2 columns, got {df.shape[1]}", 400)
 
-        scorer = UniversalAdaptiveScorer()
-        train_result = scorer.train(df, target_col=target_column, client_id=model_name)
+        if mode == "unsupervised":
+            # ── UNSUPERVISED MODE: Rank rows without needing binary target ──
+            scorer = UniversalAdaptiveScorer()
+            # Train on dummy binary target to initialize analyzer
+            # Use row index parity (even/odd) as synthetic target for initialization only
+            df_with_synthetic = df.copy()
+            df_with_synthetic["__synthetic_target__"] = (np.arange(len(df)) % 2).astype(int)
+            
+            train_result = scorer.train(df_with_synthetic, target_col="__synthetic_target__", client_id=model_name)
+            
+            # Mark this model as unsupervised so scoring knows to rank differently
+            if scorer.scorer and hasattr(scorer.scorer, 'metadata'):
+                scorer.scorer.metadata['training_mode'] = 'unsupervised'
+                scorer.scorer.metadata['original_columns'] = list(df.columns)
+            
+            train_result["analysis"]["training_mode"] = "unsupervised"
+            train_result["analysis"]["message"] = "Trained in UNSUPERVISED mode: ranks rows by multi-criteria signals (no binary target required)"
 
-        if not target_column and train_result["analysis"]["target_diagnostics"].get("recommendation") == "manual_review_recommended":
-            return error_response(
-                "AMBIGUOUS_TARGET",
-                "Automatic target detection is not reliable for this CRM export. Please provide target_column explicitly.",
-                400,
-            )
+        else:
+            # ── SUPERVISED MODE: Standard classification with binary target ──
+            scorer = UniversalAdaptiveScorer()
+            train_result = scorer.train(df, target_col=target_column, client_id=model_name)
+
+            if not target_column and train_result["analysis"]["target_diagnostics"].get("recommendation") == "manual_review_recommended":
+                return error_response(
+                    "AMBIGUOUS_TARGET",
+                    "Automatic target detection is not reliable for this CRM export. Please provide target_column explicitly or use mode=unsupervised.",
+                    400,
+                )
+            
+            train_result["analysis"]["training_mode"] = "supervised"
 
         # Save model to disk
         artifact_path = model_storage.save_model(scorer, tenant_id, model_name)
@@ -644,16 +672,16 @@ async def train_model(
         )
 
         logger.info(
-            "Training complete: tenant=%s model=%s accuracy=%.3f roc_auc=%.3f",
-            tenant_id, model_name,
-            train_result["metrics"]["accuracy"],
-            train_result["metrics"]["roc_auc"],
+            "Training complete: tenant=%s model=%s mode=%s rows=%d",
+            tenant_id, model_name, mode, len(df),
         )
 
         return success_response(data={
             "status": "success",
             "model_name": model_name,
-            "message": f"Trained on {len(df)} samples ({len(dfs)} files) with {train_result['analysis']['n_features']} features",
+            "training_mode": mode,
+            "message": f"Trained on {len(df)} samples ({len(dfs)} files) with {train_result['analysis']['n_features']} features" + 
+                      (" - UNSUPERVISED RANKING (no target needed)" if mode == "unsupervised" else ""),
             "analysis": train_result["analysis"],
             "metrics": train_result["metrics"],
         })

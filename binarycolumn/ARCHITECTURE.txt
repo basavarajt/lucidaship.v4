@@ -1,0 +1,149 @@
+TARGET DISCOVERY ARCHITECTURE
+============================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         YOUR PRODUCT FLOW                               │
+└─────────────────────────────────────────────────────────────────────────┘
+
+STEP 1: USER UPLOADS CSV
+┌─────────────────────┐
+│   Client CSV File   │  (Any schema, any structure)
+│  - Salesforce       │
+│  - HubSpot          │
+│  - Custom CRM       │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                  🆕 TARGET DISCOVERY LAYER                              │
+│                                                                         │
+│  TargetDiscoveryEngine                                                  │
+│  ├─ detect_real_target()                                               │
+│  │  └─ Look for existing binary column                                │
+│  │                                                                     │
+│  ├─ suggest_ranking_options()                                          │
+│  │  └─ Auto-generate 3-5 ranking options from CSV structure           │
+│  │                                                                     │
+│  └─ create_synthetic_target(user_choice)                               │
+│     └─ Top 50% = 1, Bottom 50% = 0                                    │
+│                                                                         │
+└─────────────┬───────────────────────────────────────────────────────────┘
+              │
+              ├─────────────────────────┬──────────────────────────┐
+              │                         │                          │
+              ▼                         ▼                          ▼
+         TARGET FOUND            NEEDS CLIENT CHOICE         CLIENT CHOOSES
+         (e.g., "Status")        (Show options in UI)        (User picks #1)
+              │                         │                          │
+              └─────────────────────────┴──────────────────────────┘
+                                   │
+                                   ▼
+                    ✅ DataFrame with __target__ column
+                                   │
+                    ═══════════════════════════════════
+              YOUR EXISTING PIPELINE (UNCHANGED)
+                    ═══════════════════════════════════
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           LOAD & PREPARE                                │
+│                                                                         │
+│  load_leads()          [Your existing function]                         │
+│  ├─ detect_roles()                                                      │
+│  ├─ find_target()      [Now just verifies __target__ exists]           │
+│  ├─ Drop ID columns                                                     │
+│  ├─ Handle nulls                                                        │
+│  └─ Parse dates                                                         │
+│                                                                         │
+└────────────────────────────┬────────────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      FEATURE ENGINEERING                                │
+│                                                                         │
+│  build_engagement_score()   [Your existing]                             │
+│  build_velocity_score()     [Your existing]                             │
+│  encode_categoricals()      [Your existing]                             │
+│  embed_text_columns()       [Your existing]                             │
+│                                                                         │
+└────────────────────────────┬────────────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          MODEL TRAINING                                 │
+│                                                                         │
+│  Random Forest      [Your existing]                                     │
+│  XGBoost            [Your existing]                                     │
+│  Logistic Regression[Your existing]                                     │
+│  StackingClassifier [Your existing]                                     │
+│                                                                         │
+└────────────────────────────┬────────────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     SCORING & DEPLOYMENT                                │
+│                                                                         │
+│  /score endpoint    [Your existing]                                     │
+│  SHAP explanations  [Your existing]                                     │
+│  Ranked leads       [Your existing]                                     │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+KEY PROPERTIES
+==============
+
+1. TARGET DISCOVERY IS NON-DISRUPTIVE
+   • It's a PRE-PROCESSOR that runs before load_leads()
+   • By the time your pipeline touches the data, __target__ exists
+   • Zero changes to any downstream function
+
+2. CLIENT NEVER SEES COMPLEXITY
+   • Upload CSV
+   • See 3-5 clear ranking options
+   • Pick one → model trains
+   • No manual feature selection, column mapping, or config
+
+3. FULLY UNIVERSAL
+   • Works on CSV with 5 columns or 50
+   • Works on any schema (Salesforce, HubSpot, custom)
+   • Same code, any customer, any data structure
+
+
+EXAMPLE: THREE DIFFERENT CUSTOMERS
+
+Customer 1 (Salesforce):
+   has: Account__c, Amount, Stage__c, LeadScore
+   discovery: Finds Stage__c binary target → Proceeds normally
+
+Customer 2 (HubSpot):
+   has: Deal Value, Lead Status, Days in Cycle, Company Size
+   discovery: No binary target → Shows options → Client picks "High Deal Value"
+
+Customer 3 (Custom):
+   has: revenue, status_code, last_activity, company
+   discovery: No binary target → Shows options → Client picks "Most Recent"
+
+THE SAME CODE HANDLES ALL THREE. No branching. No special cases.
+
+
+IMPLEMENTATION TIMELINE
+
+Today:
+  ✅ Copy target_discovery_engine.py to your repo
+  ✅ Run the demo (done above)
+
+This Week:
+  □ Update load_leads() to accept TargetDiscoveryEngine
+  □ Add /api/discover endpoint
+  □ Test with your actual CSVs
+
+Next Week:
+  □ Wire frontend (target_discovery_ui.html) to backend
+  □ Train on first customer data
+  □ Monitor model performance
+
+Next Month:
+  □ Onboard first paying customer
+  □ Collect outcomes
+  □ Retrain monthly

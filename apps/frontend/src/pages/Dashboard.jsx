@@ -19,6 +19,7 @@ export default function Dashboard() {
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState(null);
   const fileInputRef = useRef(null);
+  const [trainingMode, setTrainingMode] = useState('supervised'); // 'supervised' | 'unsupervised'
 
   // Results State
   const [trainingData, setTrainingData] = useState(null);
@@ -135,7 +136,7 @@ export default function Dashboard() {
     setError(null);
     try {
       if (activeTab === 'train') {
-        const resp = await scoringApi.train(modelName, files, targetCol);
+        const resp = await scoringApi.train(modelName, files, targetCol, trainingMode);
         setTrainingData(resp.data);
       } else if (activeTab === 'score') {
         const resp = await scoringApi.score(modelName, files);
@@ -392,6 +393,42 @@ export default function Dashboard() {
                 <div className="form-group mb-0 relative group">
                   <label className="block font-mono text-[0.6rem] tracking-[0.25em] uppercase text-dim mb-3">Target Column (Optional)</label>
                   <input type="text" value={targetCol} onChange={(e) => setTargetCol(e.target.value)} disabled={actionLoading} className="glass-input px-4 py-3 text-sm w-full" placeholder="Auto-Detect if blank" />
+                </div>
+              </div>
+
+              <div className="mb-8 p-4 border border-line bg-surface/20">
+                <label className="block font-mono text-[0.6rem] tracking-[0.25em] uppercase text-dim mb-4">Training Mode</label>
+                <div className="flex gap-6">
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="trainingMode"
+                      value="supervised"
+                      checked={trainingMode === 'supervised'}
+                      onChange={(e) => setTrainingMode(e.target.value)}
+                      disabled={actionLoading}
+                      className="w-4 h-4"
+                    />
+                    <span className="font-light text-sm">
+                      <span className="text-white">Supervised</span>
+                      <span className="text-dim text-xs ml-2">(requires binary target column)</span>
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="trainingMode"
+                      value="unsupervised"
+                      checked={trainingMode === 'unsupervised'}
+                      onChange={(e) => setTrainingMode(e.target.value)}
+                      disabled={actionLoading}
+                      className="w-4 h-4"
+                    />
+                    <span className="font-light text-sm">
+                      <span className="text-accent">Unsupervised</span>
+                      <span className="text-dim text-xs ml-2">(ranks rows without labels)</span>
+                    </span>
+                  </label>
                 </div>
               </div>
 
