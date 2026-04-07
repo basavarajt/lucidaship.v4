@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lucida Invention Claims - Adaptive Routing and Arbitration</title>
+  <style>
+    body {
+      font-family: "Liberation Serif", Georgia, serif;
+      line-height: 1.5;
+      color: #111;
+      margin: 0;
+      padding: 0;
+      background: #fff;
+    }
+    .page {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 56px 64px 72px;
+    }
+    h1, h2, h3 {
+      margin: 0 0 12px;
+      line-height: 1.2;
+    }
+    h1 {
+      font-size: 28px;
+      margin-bottom: 8px;
+    }
+    h2 {
+      font-size: 18px;
+      margin-top: 28px;
+      border-bottom: 1px solid #ccc;
+      padding-bottom: 6px;
+    }
+    h3 {
+      font-size: 15px;
+      margin-top: 20px;
+    }
+    p {
+      margin: 0 0 12px;
+      font-size: 12px;
+    }
+    ol, ul {
+      margin: 8px 0 14px 22px;
+      padding: 0;
+      font-size: 12px;
+    }
+    li {
+      margin: 0 0 7px;
+    }
+    .subtitle {
+      font-size: 13px;
+      color: #333;
+      margin-bottom: 18px;
+    }
+    .meta {
+      font-size: 11px;
+      color: #444;
+      margin-bottom: 24px;
+    }
+    .note {
+      border: 1px solid #bbb;
+      padding: 12px 14px;
+      margin: 18px 0;
+      background: #f8f8f8;
+      font-size: 11px;
+    }
+    .claim {
+      margin-bottom: 12px;
+    }
+    .claim-number {
+      font-weight: bold;
+    }
+    .small {
+      font-size: 11px;
+      color: #444;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>Lucida Adaptive Routing and Arbitration System</h1>
+    <div class="subtitle">Draft invention-claims memorandum focused on usability-supportive, patent-oriented system behavior</div>
+    <div class="meta">Prepared from the current Lucida implementation as of April 3, 2026. This document is a product and invention drafting aid, not legal advice.</div>
+
+    <h2>1. Technical Field</h2>
+    <p>This invention relates to machine-learning driven ranking systems, and more specifically to adaptive score routing, segment-specialized model arbitration, explainable cohort-aware model selection, and feedback-triggered retraining in ranking workflows.</p>
+
+    <h2>2. Technical Problem</h2>
+    <p>Conventional lead scoring systems typically apply a single model to all incoming records, even when real-world outcomes differ materially across segments. Some systems allow separate models to exist, but they do not provide a deterministic, inspectable routing policy that decides which specialized model should handle a given row, nor do they expose an arbitration ledger explaining why one candidate model was chosen over another. As a result, these systems are hard to trust, hard to govern, and weakly differentiated.</p>
+
+    <h2>3. Invention Summary</h2>
+    <p>Lucida introduces a routed adaptive ranking architecture in which a base ranking model may coexist with multiple segment-specialized models derived from real-world feedback. At score time, the system evaluates whether an incoming row matches one or more specialized cohorts, computes a deterministic routing priority, selects the winning model according to a defined arbitration policy, scores the row through the selected model, and emits a routing ledger describing the policy, candidates considered, reason for selection, and selected model.</p>
+    <p>The invention also includes feedback-derived segment hotspot detection, segment-specific retraining, automatic retrain triggering under policy thresholds, and version-aware ranking comparison. These elements together create a governed adaptive ranking system rather than a static prediction endpoint.</p>
+
+    <h2>4. Core Inventive Concepts</h2>
+    <ol>
+      <li>Adaptive generation of segment-specialized models from feedback events tied to prior scored rows.</li>
+      <li>Score-time routing of an incoming row between a base model and one or more specialized models based on cohort matching.</li>
+      <li>Deterministic arbitration among multiple matching specialized models using a routing priority composed of model-specific operational signals such as feedback row count and performance metrics.</li>
+      <li>Emission of an inspectable routing ledger containing policy identifier, route reason, selected model, matched cohort, and candidate arbitration details.</li>
+      <li>Usability-oriented surfacing of routing rationale so users can understand how the ranking decision was produced.</li>
+    </ol>
+
+    <h2>5. Independent Claim Drafts</h2>
+
+    <h3>Claim Set A: Method</h3>
+    <p class="claim"><span class="claim-number">1.</span> A computer-implemented method for adaptive ranking of records, comprising: storing a base ranking model; storing a plurality of segment-specialized ranking models each associated with a respective segment definition; receiving an input record for scoring; determining whether the input record matches one or more of the segment definitions; when the input record matches multiple segment definitions, computing a priority value for each corresponding segment-specialized ranking model according to an arbitration policy; selecting, based on the priority values, one of the segment-specialized ranking models or the base ranking model; generating a ranking score for the input record using the selected model; and outputting, together with the ranking score, routing metadata identifying the selected model and a reason for its selection.</p>
+
+    <p class="claim"><span class="claim-number">2.</span> The method of claim 1, wherein the priority value is based on at least one of: feedback volume associated with the segment-specialized ranking model, an accuracy metric associated with the segment-specialized ranking model, and an area-under-curve metric associated with the segment-specialized ranking model.</p>
+
+    <p class="claim"><span class="claim-number">3.</span> The method of claim 1, wherein the routing metadata further comprises a policy identifier and a list of candidate segment-specialized ranking models considered during arbitration.</p>
+
+    <p class="claim"><span class="claim-number">4.</span> The method of claim 1, further comprising generating the segment-specialized ranking models by retraining on feedback events associated with previously scored records belonging to corresponding segments.</p>
+
+    <h3>Claim Set B: System</h3>
+    <p class="claim"><span class="claim-number">5.</span> A ranking system comprising: one or more processors; memory storing instructions; a feedback event store linking historical score outputs to subsequent outcomes; a model store containing a base model and one or more segment-specialized models; and a routing engine configured to match an incoming row against segment criteria, arbitrate between eligible models, select a winning model, produce a score, and produce a route explanation ledger.</p>
+
+    <p class="claim"><span class="claim-number">6.</span> The system of claim 5, wherein the route explanation ledger includes at least: a selected model identifier, a route type, a matched segment value, a policy identifier, a route reason, and one or more alternative candidate models not selected.</p>
+
+    <p class="claim"><span class="claim-number">7.</span> The system of claim 5, wherein the routing engine falls back to the base model when no specialized segment model matches the incoming row.</p>
+
+    <h3>Claim Set C: Feedback-Driven Governance</h3>
+    <p class="claim"><span class="claim-number">8.</span> A computer-implemented method comprising: storing scored row snapshots with deterministic row signatures; later receiving outcome data; matching the outcome data back to the scored row snapshots using the row signatures; calculating feedback performance metrics; identifying one or more drifting segments based on disparity between predicted score and actual outcome rate; and retraining a segment-specialized model using feedback rows belonging to a selected drifting segment.</p>
+
+    <p class="claim"><span class="claim-number">9.</span> The method of claim 8, further comprising automatically triggering retraining when a policy threshold is satisfied by at least feedback volume and one or more post-score performance indicators.</p>
+
+    <p class="claim"><span class="claim-number">10.</span> The method of claim 8, wherein the retrained segment-specialized model is subsequently used by the routing engine of claim 5 for future rows matching the selected drifting segment.</p>
+
+    <h2>6. Strong Dependent Claim Directions</h2>
+    <ul>
+      <li>Priority score weighted as a combination of recent feedback volume, ROC AUC, and accuracy.</li>
+      <li>Segment definitions derived from low-cardinality categorical fields identified from feedback event payloads.</li>
+      <li>Routing metadata displayed in a user interface as part of a scored-record explanation panel.</li>
+      <li>Arbitration details limited to top candidate models ranked by deterministic priority.</li>
+      <li>Automatic creation of a segment model name derived from a base model name and a segment key/value pair.</li>
+      <li>Use of versioned artifacts so routed decisions can later be compared against prior model generations.</li>
+    </ul>
+
+    <h2>7. Novelty and Differentiation Positioning</h2>
+    <p>The strongest patentable center here is not “using ML to score leads.” That is generic. The more specific inventive center is:</p>
+    <ol>
+      <li>A closed-loop system that converts outcome feedback into segment-specialized model variants.</li>
+      <li>A score-time arbitration engine that decides which variant should handle a row.</li>
+      <li>An inspectable routing ledger that makes the arbitration itself part of the output.</li>
+    </ol>
+    <p>This is stronger because it ties together adaptation, selection, and explainability as one governed technical mechanism. That is much more concrete than a typical AutoML or ensemble scoring claim.</p>
+
+    <h2>8. Commercially Useful Claim Framing</h2>
+    <p>For usability, the user does not need to know which segment model exists in advance. The system automatically detects the route, applies the model, and explains it. For patent framing, that means the invention can be positioned as a user-facing improvement in trustworthy adaptive scoring, not merely an internal analytics pipeline.</p>
+
+    <h2>9. Recommended Filing Narrative</h2>
+    <ol>
+      <li>Start from the problem of single-model ranking failure across heterogeneous cohorts.</li>
+      <li>Describe the generation of segment-specialized models from outcome-linked feedback.</li>
+      <li>Describe row-level score-time route matching.</li>
+      <li>Describe multi-candidate arbitration with a deterministic priority rule.</li>
+      <li>Describe the output of a routing ledger for transparency, governance, and downstream trust.</li>
+    </ol>
+
+    <h2>10. Suggested Title Variants</h2>
+    <ul>
+      <li>Adaptive Ranking System with Segment-Specific Model Arbitration and Route Explanation</li>
+      <li>Feedback-Driven Cohort Routing for Machine-Learned Record Ranking</li>
+      <li>Deterministic Arbitration of Specialized Ranking Models in an Adaptive Scoring Platform</li>
+    </ul>
+
+    <div class="note">
+      <strong>Practical Note:</strong> For patent counsel, bring this document together with code excerpts for the routing policy, segment model generation, candidate priority computation, and route explanation output. Those implementation details help convert broad invention language into a defensible specification.
+    </div>
+
+    <p class="small">End of memorandum.</p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,35 @@
+# OS / Editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Env + secrets
+.env
+.env.*
+!.env.example
+
+# Runtime artifacts / datasets
+*.db
+*.sqlite3
+*.joblib
+apps/backend/model_artifacts/
+apps/backend/lucida_local.db
+
+# Logs
+*.log
