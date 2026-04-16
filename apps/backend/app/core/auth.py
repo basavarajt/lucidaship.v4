@@ -176,21 +176,24 @@ def _local_dev_user() -> Dict[str, Any]:
 
     conn = get_db()
 
-    # Ensure tenant exists
-    result = conn.execute("SELECT id FROM tenants WHERE id = ?", [LOCAL_TENANT_ID])
-    if not result.rows:
-        conn.execute(
-            "INSERT INTO tenants (id, clerk_org_id, name, plan) VALUES (?, ?, ?, ?)",
-            [LOCAL_TENANT_ID, None, "Local Development", "free"],
-        )
+    try:
+        # Ensure tenant exists
+        result = conn.execute("SELECT id FROM tenants WHERE id = ?", [LOCAL_TENANT_ID])
+        if not result.rows:
+            conn.execute(
+                "INSERT INTO tenants (id, clerk_org_id, name, plan) VALUES (?, ?, ?, ?)",
+                [LOCAL_TENANT_ID, None, "Local Development", "free"],
+            )
 
-    # Ensure user exists
-    result = conn.execute("SELECT id FROM users WHERE id = ?", [LOCAL_USER_ID])
-    if not result.rows:
-        conn.execute(
-            "INSERT INTO users (id, clerk_user_id, tenant_id, email, role) VALUES (?, ?, ?, ?, ?)",
-            [LOCAL_USER_ID, "local_clerk_id", LOCAL_TENANT_ID, LOCAL_EMAIL, "admin"],
-        )
+        # Ensure user exists
+        result = conn.execute("SELECT id FROM users WHERE id = ?", [LOCAL_USER_ID])
+        if not result.rows:
+            conn.execute(
+                "INSERT INTO users (id, clerk_user_id, tenant_id, email, role) VALUES (?, ?, ?, ?, ?)",
+                [LOCAL_USER_ID, "local_clerk_id", LOCAL_TENANT_ID, LOCAL_EMAIL, "admin"],
+            )
+    except Exception as exc:
+        logger.warning("Local dev auth bootstrap could not persist user records: %s", exc)
 
     return {
         "id": LOCAL_USER_ID,

@@ -100,6 +100,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # ── SHUTDOWN ──
     from app.database import close_db
+    from app.services.job_queue import shutdown_job_queue
+    
+    shutdown_job_queue()
     close_db()
     logger.info("Lucida shutting down")
 
@@ -155,7 +158,7 @@ async def log_requests(request: Request, call_next):
     path = request.url.path
     if path not in ("/health", "/favicon.ico"):
         logger.info(
-            "%s %s → %d (%sms)",
+            "%s %s -> %d (%sms)",
             request.method, path, response.status_code, duration_ms,
         )
     return response

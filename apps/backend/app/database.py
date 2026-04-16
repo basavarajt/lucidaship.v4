@@ -6,6 +6,7 @@ Uses libsql_client with raw SQL — no SQLAlchemy.
 import logging
 import libsql_client
 import sqlite3
+from pathlib import Path
 
 from app.core.config import get_settings
 
@@ -18,7 +19,15 @@ _connection = None
 class SqliteWrapper:
     """A wrapper mimicking the basic execute().rows signature of libsql_client."""
     def __init__(self, path):
-        self.conn = sqlite3.connect(path, check_same_thread=False)
+        if path == ":memory:":
+            self.conn = sqlite3.connect(path, check_same_thread=False, timeout=30)
+        else:
+            db_path = Path(path).expanduser().resolve()
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            self.conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30)
+            self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA synchronous=NORMAL")
+        self.conn.execute("PRAGMA busy_timeout=30000")
     def execute(self, sql, args=None):
         if args is None: args = []
         cur = self.conn.execute(sql, args)
@@ -52,8 +61,16 @@ def get_db():
             logger.info("Connected to Turso: %s", url.split("@")[-1] if "@" in url else url[:40])
         else:
             # Local SQLite fallback for development without Turso
-            _connection = SqliteWrapper("lucida_local.db")
-            logger.warning("No Turso credentials — using local SQLite fallback")
+            try:
+                _connection = SqliteWrapper(settings.SQLITE_DB_PATH)
+                logger.warning("No Turso credentials - using local SQLite fallback at %s", settings.SQLITE_DB_PATH)
+            except (PermissionError, OSError, sqlite3.Error) as exc:
+                logger.warning(
+                    "Local SQLite path '%s' unavailable (%s) — falling back to in-memory SQLite for this process",
+                    settings.SQLITE_DB_PATH,
+                    exc,
+                )
+                _connection = SqliteWrapper(":memory:")
 
     return _connection
 

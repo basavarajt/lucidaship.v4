@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { scoringApi, modelsApi } from '../api/client';
 import { LogOut, UploadCloud, Database, Download, CheckCircle2, Trash2, AlertCircle, Loader, File as FileIcon, Target, Activity, X, BrainCircuit } from 'lucide-react';
+import ProgressBar from '../components/ProgressBar';
 
 const INVESTOR_MODE_ENABLED = import.meta.env.VITE_ENABLE_MERGE_INSPECTOR === 'true';
 const MERGE_INSPECTOR_STORAGE_KEY = 'lucida_merge_inspector_enabled';
@@ -15,6 +16,10 @@ export default function Dashboard() {
   // Tab State
   const [activeTab, setActiveTab] = useState('train'); // 'train' | 'score' | 'feedback' | 'models'
 
+  // Progress Tracking State
+  const [progressType, setProgressType] = useState(null); // 'train' | 'score' | 'feedback' | null
+  const [estimatedTime, setEstimatedTime] = useState(30); // Default estimate in seconds
+
   // Uploader State
   const [files, setFiles] = useState([]);
   const [modelName, setModelName] = useState('Ensemble-01');
@@ -24,6 +29,8 @@ export default function Dashboard() {
   const [error, setError] = useState(null);
   const fileInputRef = useRef(null);
   const [trainingMode, setTrainingMode] = useState('supervised'); // 'supervised' | 'unsupervised'
+  const [autoSelectModel, setAutoSelectModel] = useState(true);
+  const [selectModelFromList, setSelectModelFromList] = useState(false);
 
   // Results State
   const [trainingData, setTrainingData] = useState(null);
@@ -97,6 +104,12 @@ export default function Dashboard() {
   }, [activeTab]);
 
   useEffect(() => {
+    if (activeTab === 'score' && modelsArchive.length === 0) {
+      loadModels();
+    }
+  }, [activeTab, modelsArchive.length]);
+
+  useEffect(() => {
     if (activeTab === 'feedback' && modelName) {
       loadModelIntel(modelName);
     }
@@ -162,12 +175,24 @@ export default function Dashboard() {
     }
     setActionLoading(true);
     setError(null);
+    setProgressType(activeTab);
+    
+    // Estimate time based on file size
+    const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+    const estimatedSeconds = activeTab === 'train' 
+      ? Math.max(30, Math.ceil(totalSize / 1024 / 100)) // ~100KB per second
+      : activeTab === 'score'
+      ? Math.max(15, Math.ceil(totalSize / 1024 / 500)) // ~500KB per second (faster)
+      : Math.max(20, Math.ceil(totalSize / 1024 / 300)); // ~300KB per second for feedback
+    
+    setEstimatedTime(estimatedSeconds);
+    
     try {
       if (activeTab === 'train') {
         const resp = await scoringApi.train(modelName, files, targetCol, trainingMode);
         setTrainingData(resp.data);
       } else if (activeTab === 'score') {
-        const resp = await scoringApi.score(modelName, files);
+        const resp = await scoringApi.score(modelName, files, autoSelectModel);
         setScoringData(resp.data);
       } else if (activeTab === 'feedback') {
         const resp = await scoringApi.feedback(modelName, files[0], outcomeColumn, autoRetrainEnabled, feedbackWeight);
@@ -181,6 +206,7 @@ export default function Dashboard() {
       setError(backendErr || detailErr || err.message || "An unexpected anomaly occurred.");
     } finally {
       setActionLoading(false);
+      setProgressType(null);
     }
   };
 
@@ -216,6 +242,8 @@ export default function Dashboard() {
   const handleRetrainFromFeedback = async () => {
     setActionLoading(true);
     setError(null);
+    setProgressType('train');
+    setEstimatedTime(30); // Default 30s for retrain
     try {
       const resp = await scoringApi.retrainFromFeedback(modelName, feedbackWeight);
       setFeedbackRetrainData(resp.data);
@@ -227,6 +255,7 @@ export default function Dashboard() {
       setError(backendErr || detailErr || err.message || "Feedback retrain failed.");
     } finally {
       setActionLoading(false);
+      setProgressType(null);
     }
   };
 
@@ -479,6 +508,12 @@ export default function Dashboard() {
                 </div>
               </div>
 
+              <ProgressBar 
+                isActive={actionLoading && progressType === 'train'} 
+                label="Model Training in Progress"
+                estimatedTime={estimatedTime}
+              />
+
               <button onClick={executePipeline} disabled={actionLoading || files.length === 0} className="btn-primary w-full flex justify-center items-center py-4 text-sm tracking-widest">
                 {actionLoading ? <Loader className="w-5 h-5 animate-spin" /> : 'EXECUTE TRAINING SEQUENCE'}
               </button>
@@ -681,8 +716,59 @@ export default function Dashboard() {
 
               <div className="form-group mb-8 relative group w-full md:w-1/2">
                 <label className="block font-mono text-[0.6rem] tracking-[0.25em] uppercase text-dim mb-3">Utilize Architecture Payload</label>
-                <input type="text" value={modelName} onChange={(e) => setModelName(e.target.value)} disabled={actionLoading} className="glass-input px-4 py-3 text-sm w-full" placeholder="Ensemble-01" />
+                <label className="flex items-center gap-3 mb-3 px-3 py-2 border border-line bg-surface/60 hover:border-accent/40 transition-colors cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectModelFromList}
+                    onChange={(e) => setSelectModelFromList(e.target.checked)}
+                    disabled={actionLoading}
+                    className="h-4 w-4 accent-accent"
+                  />
+                  <span className="text-xs font-light text-light">
+                    Select model from trained model list
+                  </span>
+                </label>
+                {selectModelFromList ? (
+                  <select
+                    value={modelName}
+                    onChange={(e) => setModelName(e.target.value)}
+                    disabled={actionLoading}
+                    className="glass-input bg-surface text-white border border-line px-4 py-3 text-sm w-full focus:border-accent"
+                  >
+                    {modelsArchive.length === 0 ? (
+                      <option value={modelName} className="bg-black text-white">
+                        No models loaded (using current value)
+                      </option>
+                    ) : (
+                      modelsArchive.map((m) => (
+                        <option key={m.model_name} value={m.model_name} className="bg-black text-white">
+                          {m.model_name}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                ) : (
+                  <input type="text" value={modelName} onChange={(e) => setModelName(e.target.value)} disabled={actionLoading} className="glass-input px-4 py-3 text-sm w-full" placeholder="Ensemble-01" />
+                )}
+                <label className="flex items-center gap-3 mt-3 px-3 py-2 border border-line bg-surface/60 hover:border-accent/40 transition-colors cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoSelectModel}
+                    onChange={(e) => setAutoSelectModel(e.target.checked)}
+                    disabled={actionLoading}
+                    className="h-4 w-4 accent-accent"
+                  />
+                  <span className="text-xs font-light text-light">
+                    Auto-match best model by scoring schema
+                  </span>
+                </label>
               </div>
+
+              <ProgressBar 
+                isActive={actionLoading && progressType === 'score'} 
+                label="Scoring Leads in Progress"
+                estimatedTime={estimatedTime}
+              />
 
               <button onClick={executePipeline} disabled={actionLoading || files.length === 0} className="btn-primary w-full flex justify-center items-center py-4 text-sm tracking-widest bg-emerald-600/20 text-emerald-500 border-emerald-500/50 hover:bg-emerald-600/30">
                 {actionLoading ? <Loader className="w-5 h-5 animate-spin" /> : 'EXECUTE SCORING SEQUENCE'}
@@ -718,6 +804,14 @@ export default function Dashboard() {
                 <div className="p-6 border-b border-line bg-surface flex justify-between items-center flex-wrap gap-4">
                   <div>
                     <h3 className="font-serif text-xl font-light text-white mb-1">Ranked Matrix: {scoringData.model_name}</h3>
+                    {scoringData.model_selection && (
+                      <div className="mt-1 text-xs text-dim break-words [overflow-wrap:anywhere]">
+                        {scoringData.model_selection.auto_selected
+                          ? `Auto-selected model: ${scoringData.model_selection.selected_model}`
+                          : `Manual model: ${scoringData.model_selection.selected_model || scoringData.model_name}`}
+                        {scoringData.model_selection.ambiguous ? ' — Similar models detected, you can switch model name.' : ''}
+                      </div>
+                    )}
                     <span className="font-mono text-[0.55rem] tracking-[0.2em] text-accent uppercase">{scoringData.n_leads} total rows scored</span>
                     {scoringData.routing_summary && (
                       <div className="mt-2 text-xs text-dim">
@@ -1025,6 +1119,12 @@ export default function Dashboard() {
                 </div>
               </div>
 
+              <ProgressBar 
+                isActive={actionLoading && progressType === 'feedback'} 
+                label="Ingesting Feedback Signal"
+                estimatedTime={estimatedTime}
+              />
+
               <button onClick={executePipeline} disabled={actionLoading || files.length === 0} className="btn-primary w-full flex justify-center items-center py-4 text-sm tracking-widest">
                 {actionLoading ? <Loader className="w-5 h-5 animate-spin" /> : 'INGEST FEEDBACK SIGNAL'}
               </button>
@@ -1125,7 +1225,7 @@ export default function Dashboard() {
                 )}
 
                 <div className="mt-8 border border-line p-5 bg-black">
-                  <div className="grid md:grid-cols-[1fr,180px,220px] gap-4 items-end">
+                  <div className="grid md:grid-cols-[1fr,180px,auto] gap-4 items-end">
                     <div>
                       <div className="font-mono text-[0.55rem] tracking-[0.2em] uppercase text-accent mb-3">Adaptive Retrain</div>
                       <p className="text-sm text-dim leading-relaxed">Create a fresh model version directly from accumulated feedback events so ranking behavior starts learning from real outcomes.</p>
@@ -1141,9 +1241,16 @@ export default function Dashboard() {
                         className="glass-input px-4 py-3 text-sm w-full"
                       />
                     </div>
-                    <button onClick={handleRetrainFromFeedback} disabled={actionLoading} className="btn-primary w-full flex justify-center items-center py-4 text-sm tracking-widest">
-                      {actionLoading ? <Loader className="w-5 h-5 animate-spin" /> : 'RETRAIN FROM FEEDBACK'}
-                    </button>
+                    <div className="flex-1 flex flex-col gap-3 md:w-[220px]">
+                      <ProgressBar 
+                        isActive={actionLoading && progressType === 'train'} 
+                        label="Retraining Model from Feedback"
+                        estimatedTime={estimatedTime}
+                      />
+                      <button onClick={handleRetrainFromFeedback} disabled={actionLoading} className="btn-primary w-full flex justify-center items-center py-4 text-sm tracking-widest">
+                        {actionLoading ? <Loader className="w-5 h-5 animate-spin" /> : 'RETRAIN FROM FEEDBACK'}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -1312,60 +1419,60 @@ export default function Dashboard() {
                   <div key={i} className="bg-surface border border-line p-8 relative group hover:border-accent/40 transition-colors">
                     <button onClick={() => handleDeleteModel(m.model_name)} className="absolute top-4 right-4 text-dim hover:text-red-500 p-2 border border-transparent hover:border-red-500/50 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"><Trash2 className="w-4 h-4" /></button>
                     
-                    <h4 className="font-serif text-2xl font-light text-white mb-2">{m.model_name}</h4>
+                    <h4 className="font-serif text-2xl font-light text-white mb-2 break-words [overflow-wrap:anywhere]">{m.model_name}</h4>
                     <div className="font-mono text-[0.55rem] tracking-[0.1em] text-accent mb-8 uppercase">
                       {m.trained_at ? new Date(m.trained_at).toLocaleString() : 'Legacy Origin'}
                     </div>
 
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 items-start [&>div]:min-w-0">
                       <div>
                         <div className="font-mono text-[0.55rem] tracking-[0.1em] text-dim uppercase mb-1">Vectors</div>
-                        <div className="text-sm font-light text-white">{m.n_rows || 0}</div>
+                        <div className="text-sm font-light text-white break-words [overflow-wrap:anywhere]">{m.n_rows || 0}</div>
                       </div>
                       <div>
                         <div className="font-mono text-[0.55rem] tracking-[0.1em] text-dim uppercase mb-1">Dimensions</div>
-                        <div className="text-sm font-light text-white">{m.n_cols || 0}</div>
+                        <div className="text-sm font-light text-white break-words [overflow-wrap:anywhere]">{m.n_cols || 0}</div>
                       </div>
                       {m.accuracy !== undefined && (
                         <div>
                           <div className="font-mono text-[0.55rem] tracking-[0.1em] text-dim uppercase mb-1">Accuracy</div>
-                          <div className="text-sm font-light text-white">{(m.accuracy * 100).toFixed(1)}%</div>
+                          <div className="text-sm font-light text-white break-words [overflow-wrap:anywhere]">{(m.accuracy * 100).toFixed(1)}%</div>
                         </div>
                       )}
                       {m.roc_auc !== undefined && (
                         <div>
                           <div className="font-mono text-[0.55rem] tracking-[0.1em] text-dim uppercase mb-1">ROC AUC</div>
-                          <div className="text-sm font-light text-white">{(m.roc_auc * 100).toFixed(1)}%</div>
+                          <div className="text-sm font-light text-white break-words [overflow-wrap:anywhere]">{(m.roc_auc * 100).toFixed(1)}%</div>
                         </div>
                       )}
                       {m.ranking_version && (
                         <div>
                           <div className="font-mono text-[0.55rem] tracking-[0.1em] text-dim uppercase mb-1">Rank Ver</div>
-                          <div className="text-sm font-light text-white">{m.ranking_version}</div>
+                          <div className="text-sm font-light text-white break-words [overflow-wrap:anywhere]">{m.ranking_version}</div>
                         </div>
                       )}
                       {m.target_recommendation && (
                         <div>
                           <div className="font-mono text-[0.55rem] tracking-[0.1em] text-dim uppercase mb-1">Target Audit</div>
-                          <div className="text-sm font-light text-white">{m.target_recommendation}</div>
+                          <div className="text-sm font-light text-white break-words [overflow-wrap:anywhere]">{m.target_recommendation}</div>
                         </div>
                       )}
                       {m.feedback_summary?.retrain_readiness && (
                         <div>
                           <div className="font-mono text-[0.55rem] tracking-[0.1em] text-dim uppercase mb-1">Feedback</div>
-                          <div className="text-sm font-light text-white">{m.feedback_summary.retrain_readiness}</div>
+                          <div className="text-sm font-light text-white break-words [overflow-wrap:anywhere]">{m.feedback_summary.retrain_readiness}</div>
                         </div>
                       )}
                       {m.feedback_summary?.total_feedback_events !== undefined && (
                         <div>
                           <div className="font-mono text-[0.55rem] tracking-[0.1em] text-dim uppercase mb-1">Feedback Rows</div>
-                          <div className="text-sm font-light text-white">{m.feedback_summary.total_feedback_events}</div>
+                          <div className="text-sm font-light text-white break-words [overflow-wrap:anywhere]">{m.feedback_summary.total_feedback_events}</div>
                         </div>
                       )}
                       {m.segment_hotspots?.[0] && (
                         <div>
                           <div className="font-mono text-[0.55rem] tracking-[0.1em] text-dim uppercase mb-1">Hot Segment</div>
-                          <div className="text-sm font-light text-white">{m.segment_hotspots[0].dimension}: {m.segment_hotspots[0].segment}</div>
+                          <div className="text-sm font-light text-white break-words [overflow-wrap:anywhere]">{m.segment_hotspots[0].dimension}: {m.segment_hotspots[0].segment}</div>
                         </div>
                       )}
                     </div>

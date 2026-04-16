@@ -13,8 +13,10 @@ Both the backend (FastAPI) and frontend (React) are fully configured and ready t
 cd /workspaces/lucidaanalytics-v3.0/apps/backend
 source .venv/bin/activate
 pip install -q -r requirements.txt
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn main:app --reload --host 0.0.0.0 --port 8000 --timeout-keep-alive 600
 ```
+
+**NOTE: Added `--timeout-keep-alive 600`** (10 minutes) for long-running training requests
 
 **Expected Output:**
 ```

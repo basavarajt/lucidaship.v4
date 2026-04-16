@@ -7,7 +7,7 @@ import io
 import json
 import uuid
 import logging
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any, Tuple
 
 from fastapi import APIRouter, UploadFile, File, Query, Depends, BackgroundTasks
 import pandas as pd
@@ -22,15 +22,21 @@ from app.services import model_storage
 from app.services.dataset_relationships import (
     DatasetAsset,
     analyze_dataset_collection,
+    execute_merge_plan,
     prepare_combined_dataset,
 )
 from app.services.explanation_translator import translate_scoring_results
+from app.services.upload_quantization import IngestedDatasetAsset, ingest_uploaded_dataset
+from app.services.job_queue import get_job_queue, JobStatus
 from adaptive_scorer import UniversalAdaptiveScorer, DataAnalyzer, EngagementScorer, ActionRecommender
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 router = APIRouter(tags=["Scoring"])
+
+# ── Job Queue for async operations ────────────────────────────
+job_queue = get_job_queue()
 
 # ── In-memory model cache ─────────────────────────────────────
 # {tenant_id: {model_name: UniversalAdaptiveScorer}}
@@ -51,6 +57,162 @@ def _row_signature(data: dict) -> str:
 def _get_model(tenant_id: str, model_name: str) -> Optional[UniversalAdaptiveScorer]:
     """Get model from cache."""
     return trained_models.get(tenant_id, {}).get(model_name)
+
+
+def _extract_model_input_columns(model: UniversalAdaptiveScorer) -> set[str]:
+    """Best-effort extraction of raw input columns a model expects."""
+    columns: set[str] = set()
+
+    engineer = getattr(model, "engineer", None)
+    feature_lineage = getattr(engineer, "feature_lineage", {}) if engineer else {}
+    if isinstance(feature_lineage, dict):
+        for meta in feature_lineage.values():
+            if isinstance(meta, dict):
+                source = meta.get("source_column")
+                if source:
+                    columns.add(str(source))
+
+    analyzer = getattr(model, "analyzer", None)
+    column_types = getattr(analyzer, "column_types", {}) if analyzer else {}
+    if isinstance(column_types, dict):
+        for col, col_type in column_types.items():
+            if col_type != "ignore":
+                columns.add(str(col))
+
+    target_col = getattr(analyzer, "target_col", None) if analyzer else None
+    if target_col:
+        columns.discard(str(target_col))
+    columns.discard("__synthetic_target__")
+
+    return {c for c in columns if c and c != "None"}
+
+
+def _score_model_compatibility(model: UniversalAdaptiveScorer, input_columns: set[str]) -> Dict[str, Any]:
+    """Compute schema compatibility score between scoring payload and model."""
+    expected = _extract_model_input_columns(model)
+    if not expected:
+        return {
+            "score": 0.0,
+            "expected_columns": 0,
+            "matched_columns": 0,
+            "coverage": 0.0,
+            "precision": 0.0,
+            "matched_sample": [],
+            "missing_sample": [],
+        }
+
+    matched = expected & input_columns
+    missing = expected - input_columns
+    unexpected = input_columns - expected
+
+    coverage = len(matched) / len(expected) if expected else 0.0
+    precision = len(matched) / len(input_columns) if input_columns else 0.0
+    score = (0.7 * coverage) + (0.3 * precision)
+
+    return {
+        "score": float(round(score, 4)),
+        "expected_columns": int(len(expected)),
+        "matched_columns": int(len(matched)),
+        "coverage": float(round(coverage, 4)),
+        "precision": float(round(precision, 4)),
+        "matched_sample": sorted(list(matched))[:8],
+        "missing_sample": sorted(list(missing))[:8],
+        "unexpected_sample": sorted(list(unexpected))[:8],
+    }
+
+
+def _choose_model_for_dataframe(
+    tenant_id: str,
+    requested_model: str,
+    df: pd.DataFrame,
+    *,
+    auto_select_model: bool,
+    ambiguity_margin: float = 0.05,
+    minimum_score: float = 0.35,
+) -> Tuple[Optional[str], Optional[UniversalAdaptiveScorer], Dict[str, Any]]:
+    """
+    Resolve model selection for scoring.
+    - Default behavior: keep requested model (backward-compatible).
+    - Auto-select mode: choose highest schema-compatibility model and report ambiguity.
+    """
+    tenant_models = trained_models.get(tenant_id, {}) or {}
+    input_columns = {str(c) for c in df.columns}
+
+    if not tenant_models:
+        return None, None, {
+            "status": "no_models_available",
+            "requested_model": requested_model,
+            "auto_selected": False,
+        }
+
+    # Backward-compatible: explicit model wins unless auto-select requested.
+    if not auto_select_model and requested_model != "auto":
+        scorer = tenant_models.get(requested_model)
+        if scorer is None:
+            return None, None, {
+                "status": "requested_model_not_found",
+                "requested_model": requested_model,
+                "available_models": sorted(list(tenant_models.keys()))[:25],
+                "auto_selected": False,
+            }
+        return requested_model, scorer, {
+            "status": "manual_model_selected",
+            "requested_model": requested_model,
+            "selected_model": requested_model,
+            "auto_selected": False,
+        }
+
+    candidates = []
+    for name, model in tenant_models.items():
+        compatibility = _score_model_compatibility(model, input_columns)
+        candidates.append({
+            "model_name": name,
+            "compatibility": compatibility,
+        })
+    candidates.sort(key=lambda item: item["compatibility"]["score"], reverse=True)
+
+    best = candidates[0]
+    second = candidates[1] if len(candidates) > 1 else None
+    best_score = best["compatibility"]["score"]
+    second_score = second["compatibility"]["score"] if second else 0.0
+    ambiguous = bool(
+        second
+        and best_score >= minimum_score
+        and second_score >= minimum_score
+        and (best_score - second_score) <= ambiguity_margin
+    )
+
+    if best_score < minimum_score:
+        return None, None, {
+            "status": "no_confident_model_match",
+            "requested_model": requested_model,
+            "selected_model": None,
+            "auto_selected": True,
+            "ambiguous": False,
+            "best_score": best_score,
+            "minimum_score": minimum_score,
+            "candidates": candidates[:5],
+        }
+
+    selected_name = best["model_name"]
+    selected_model = tenant_models[selected_name]
+    return selected_name, selected_model, {
+        "status": "auto_model_selected",
+        "requested_model": requested_model,
+        "selected_model": selected_name,
+        "auto_selected": True,
+        "ambiguous": ambiguous,
+        "best_score": best_score,
+        "second_best_score": second_score if second else None,
+        "ambiguity_margin": ambiguity_margin,
+        "minimum_score": minimum_score,
+        "candidates": candidates[:5],
+        "message": (
+            "Multiple similar models matched this scoring dataset; user may override model_name."
+            if ambiguous
+            else "Model selected by schema compatibility."
+        ),
+    }
 
 
 def _set_model(tenant_id: str, model_name: str, model: UniversalAdaptiveScorer):
@@ -106,11 +268,12 @@ MAX_CSV_SIZE = MAX_CSV_SIZE_MB * 1024 * 1024
 MAX_COLUMNS = 500
 
 
-async def _validate_and_read_files(
+async def _validate_and_ingest_files(
     file: Optional[UploadFile],
     files: Optional[List[UploadFile]],
-) -> List[pd.DataFrame]:
-    """Validate and read uploaded CSV files with security checks."""
+    target_column: Optional[str] = None,
+) -> List[IngestedDatasetAsset]:
+    """Validate, read, and pre-compress uploaded CSV files with security checks."""
     all_files = []
     if file:
         all_files.append(file)
@@ -120,7 +283,7 @@ async def _validate_and_read_files(
     if not all_files:
         raise ValueError("No files uploaded. Use field 'file' or 'files'.")
 
-    dfs = []
+    ingested_assets = []
     for f in all_files:
         # Validate file extension
         filename = f.filename or ""
@@ -141,9 +304,21 @@ async def _validate_and_read_files(
         if len(df.columns) > MAX_COLUMNS:
             raise ValueError(f"File '{filename}' has {len(df.columns)} columns (max {MAX_COLUMNS})")
 
-        dfs.append(df)
+        ingested_assets.append(
+            ingest_uploaded_dataset(
+                filename,
+                df,
+                enabled=settings.UPLOAD_COMPRESSION_ENABLED,
+                mode=settings.UPLOAD_COMPRESSION_MODE,
+                numeric_only=settings.UPLOAD_COMPRESSION_NUMERIC_ONLY,
+                min_rows=settings.UPLOAD_COMPRESSION_MIN_ROWS,
+                max_allowed_mse=settings.UPLOAD_COMPRESSION_MAX_ALLOWED_MSE,
+                max_allowed_ip_error=settings.UPLOAD_COMPRESSION_MAX_ALLOWED_IP_ERROR,
+                target_column=target_column,
+            )
+        )
 
-    return dfs
+    return ingested_assets
 
 
 def _uploaded_dataset_names(
@@ -162,11 +337,61 @@ def _uploaded_dataset_names(
     return names
 
 
-def _prepare_assets(dataset_names: List[str], dfs: List[pd.DataFrame]) -> List[DatasetAsset]:
+def _prepare_assets(dataset_names: List[str], ingested_assets: List[IngestedDatasetAsset]) -> List[DatasetAsset]:
     return [
-        DatasetAsset(name=name, df=df)
-        for name, df in zip(dataset_names, dfs)
+        DatasetAsset(
+            name=name,
+            df=ingested.raw_df,
+            raw_df=ingested.raw_df,
+            protected_df=ingested.protected_df,
+            dequantized_df=ingested.dequantized_df,
+            compression=ingested.diagnostics,
+            execution_mode=ingested.mode,
+        )
+        for name, ingested in zip(dataset_names, ingested_assets)
     ]
+
+
+def _compression_summary(assets: List[DatasetAsset]) -> Dict:
+    dataset_summaries = []
+    total_memory_saved = 0.0
+    used_compressed_execution = False
+
+    for asset in assets:
+        compression = asset.compression or {}
+        total_memory_saved += float(compression.get("estimated_memory_saved_mb") or 0.0)
+        used_compressed_execution = used_compressed_execution or bool(compression.get("used_compressed_execution"))
+        dataset_summaries.append({
+            "dataset": asset.name,
+            "mode": compression.get("mode", asset.execution_mode),
+            "eligible_numeric_columns": compression.get("eligible_numeric_columns", []),
+            "compressed_numeric_columns": compression.get("compressed_numeric_columns", []),
+            "bypass_reason": compression.get("bypass_reason"),
+            "latency_ms": compression.get("latency_ms", 0.0),
+            "estimated_memory_saved_mb": compression.get("estimated_memory_saved_mb", 0.0),
+            "distortion_metrics": compression.get("distortion_metrics"),
+        })
+
+    return {
+        "enabled": settings.UPLOAD_COMPRESSION_ENABLED,
+        "mode": settings.UPLOAD_COMPRESSION_MODE,
+        "used_compressed_execution": used_compressed_execution,
+        "estimated_memory_saved_mb": round(total_memory_saved, 4),
+        "datasets": dataset_summaries,
+    }
+
+
+def _resolve_combined_dataset(assets: List[DatasetAsset], compression: Dict) -> tuple[pd.DataFrame, Dict]:
+    """
+    Prepare the merged dataset once for the dominant full-precision path.
+    Only re-execute on dequantized assets when compressed execution is explicitly enabled.
+    """
+    if compression.get("used_compressed_execution"):
+        execution_assets = [asset.for_execution() for asset in assets]
+        _, merge_plan = prepare_combined_dataset(assets)
+        return execute_merge_plan(execution_assets, merge_plan)
+
+    return prepare_combined_dataset(assets)
 
 
 # ── Background task: persist scored leads ────────────────────
@@ -213,8 +438,8 @@ async def merge_plan(
     """Profile uploaded datasets and recommend safe relationship-aware merge steps."""
     try:
         dataset_names = _uploaded_dataset_names(file, files)
-        dfs = await _validate_and_read_files(file, files)
-        assets = _prepare_assets(dataset_names, dfs)
+        ingested_assets = await _validate_and_ingest_files(file, files)
+        assets = _prepare_assets(dataset_names, ingested_assets)
         analysis = analyze_dataset_collection(assets)
         _, plan = prepare_combined_dataset(assets)
 
@@ -222,6 +447,7 @@ async def merge_plan(
             "status": "success",
             "analysis": analysis,
             "merge_plan": plan,
+            "compression": _compression_summary(assets),
         })
     except ValueError as e:
         return error_response("VALIDATION_ERROR", str(e), 400)
@@ -671,12 +897,13 @@ async def train_model(
     tenant_id = user["tenant_id"]
     try:
         dataset_names = _uploaded_dataset_names(file, files)
-        dfs = await _validate_and_read_files(file, files)
-        assets = _prepare_assets(dataset_names, dfs)
+        ingested_assets = await _validate_and_ingest_files(file, files, target_column=target_column)
+        assets = _prepare_assets(dataset_names, ingested_assets)
+        compression = _compression_summary(assets)
 
-        logger.info("Training: tenant=%s model=%s mode=%s files=%d", tenant_id, model_name, mode, len(dfs))
+        logger.info("Training: tenant=%s model=%s mode=%s files=%d", tenant_id, model_name, mode, len(assets))
 
-        df, merge_plan = prepare_combined_dataset(assets)
+        df, merge_plan = _resolve_combined_dataset(assets, compression)
         logger.info("Prepared data shape: %s using strategy=%s", df.shape, merge_plan.get("strategy"))
 
         if len(assets) > 1 and not merge_plan.get("executed_steps") and merge_plan.get("warnings"):
@@ -729,15 +956,26 @@ async def train_model(
         # Cache in memory
         _set_model(tenant_id, model_name, scorer)
 
+        persistence_warning = None
+
         # Save training run to Turso
-        run_id = str(uuid.uuid4())
-        conn = get_db()
-        conn.execute(
-            """INSERT INTO training_runs (id, tenant_id, model_name, artifact_path, metrics, row_count, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
-            [run_id, tenant_id, model_name, artifact_path,
-             json.dumps(train_result["metrics"], default=str), len(df)],
-        )
+        try:
+            run_id = str(uuid.uuid4())
+            conn = get_db()
+            conn.execute(
+                """INSERT INTO training_runs (id, tenant_id, model_name, artifact_path, metrics, row_count, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
+                [run_id, tenant_id, model_name, artifact_path,
+                 json.dumps(train_result["metrics"], default=str), len(df)],
+            )
+        except Exception as exc:
+            persistence_warning = f"Training succeeded but metadata persistence was unavailable: {exc}"
+            logger.warning(
+                "Training metadata persistence failed: tenant=%s model=%s error=%s",
+                tenant_id,
+                model_name,
+                exc,
+            )
 
         logger.info(
             "Training complete: tenant=%s model=%s mode=%s rows=%d",
@@ -748,11 +986,13 @@ async def train_model(
             "status": "success",
             "model_name": model_name,
             "training_mode": mode,
-            "message": f"Trained on {len(df)} samples ({len(dfs)} files) with {train_result['analysis']['n_features']} features" + 
+            "message": f"Trained on {len(df)} samples ({len(assets)} files) with {train_result['analysis']['n_features']} features" + 
                       (" - UNSUPERVISED RANKING (no target needed)" if mode == "unsupervised" else ""),
             "analysis": train_result["analysis"],
             "metrics": train_result["metrics"],
             "merge_plan": merge_plan,
+            "compression": compression,
+            "persistence_warning": persistence_warning,
         })
 
     except ValueError as e:
@@ -763,6 +1003,163 @@ async def train_model(
         return error_response("TRAINING_FAILED", f"Training failed: {str(e)}", 500)
 
 
+# ── ASYNC TRAINING ENDPOINTS (Non-blocking, Production-Ready) ───
+
+@router.post("/train/async")
+async def train_model_async(
+    file: Optional[UploadFile] = File(None),
+    files: Optional[List[UploadFile]] = File(None),
+    model_name: str = Query("default", description="Name for this model"),
+    target_column: Optional[str] = Query(None),
+    mode: str = Query("supervised", description="'supervised' or 'unsupervised'"),
+    user: dict = Depends(get_current_user),
+):
+    """
+    Queue long-running training job. Returns immediately with job_id.
+    
+    **For production use - doesn't timeout!**
+    
+    Response: {job_id, status, created_at}
+    Then poll: GET /train/status/{job_id}
+    """
+    tenant_id = user["tenant_id"]
+    
+    try:
+        # Read file content into memory
+        files_data = []
+        
+        if file:
+            content = await file.read()
+            files_data.append((file.filename or "upload.csv", content))
+        
+        if files:
+            for f in files:
+                content = await f.read()
+                files_data.append((f.filename or "upload.csv", content))
+        
+        if not files_data:
+            return error_response("NO_FILES", "No files provided", 400)
+        
+        # Create job in queue
+        job_id = job_queue.create_job(model_name, tenant_id)
+        
+        # Define progress callback
+        def progress_callback(progress: int, step: str):
+            job_queue.update_job_progress(job_id, progress, step)
+        
+        # Import here to avoid circular imports
+        from app.services.training_task import execute_training_task
+        
+        # Start background task (won't block response)
+        job_queue.execute_job(
+            job_id,
+            execute_training_task,
+            files_data=files_data,
+            target_column=target_column,
+            mode=mode,
+            model_name=model_name,
+            tenant_id=tenant_id,
+            progress_callback=progress_callback,
+        )
+        
+        logger.info(f"Created async training job {job_id} for {model_name}")
+        
+        return success_response(data={
+            "job_id": job_id,
+            "status": "queued",
+            "model_name": model_name,
+            "message": f"Training queued. Poll /train/status/{job_id} for updates",
+            "poll_url": f"/train/status/{job_id}",
+            "result_url": f"/train/{job_id}/result",
+        })
+    
+    except Exception as e:
+        logger.exception("Failed to queue training job")
+        return error_response("JOB_QUEUE_ERROR", str(e), 500)
+
+
+@router.get("/train/status/{job_id}")
+async def get_training_status(
+    job_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Poll this endpoint to check training progress.
+    Returns: status, progress (0-100), current_step, elapsed_time
+    """
+    tenant_id = user["tenant_id"]
+    
+    job = job_queue.get_job(job_id)
+    if not job:
+        return error_response("JOB_NOT_FOUND", f"Job {job_id} not found", 404)
+    
+    # Verify tenant ownership
+    if job.tenant_id != tenant_id:
+        return error_response("UNAUTHORIZED", "You don't have access to this job", 403)
+    
+    return success_response(data=job.to_dict())
+
+
+@router.get("/train/{job_id}/result")
+async def get_training_result(
+    job_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Get final training results when job is completed.
+    Returns: metrics, model_name, target_column, dataset info
+    """
+    tenant_id = user["tenant_id"]
+    
+    job = job_queue.get_job(job_id)
+    if not job:
+        return error_response("JOB_NOT_FOUND", f"Job {job_id} not found", 404)
+    
+    # Verify tenant ownership
+    if job.tenant_id != tenant_id:
+        return error_response("UNAUTHORIZED", "You don't have access to this job", 403)
+    
+    # Check if still processing
+    if job.status == JobStatus.QUEUED or job.status == JobStatus.PROCESSING:
+        return error_response(
+            "JOB_NOT_READY",
+            f"Job still {job.status.value}. Check /train/status/{job_id}",
+            202,  # 202 Accepted
+        )
+    
+    # Check if failed
+    if job.status == JobStatus.FAILED:
+        return error_response("JOB_FAILED", job.error or "Unknown error", 500)
+    
+    # Return result
+    return success_response(data={
+        "job_id": job_id,
+        "status": job.status.value,
+        "model_name": job.model_name,
+        "result": job.result,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+    })
+
+
+@router.get("/train/jobs")
+async def list_training_jobs(
+    limit: int = Query(50, ge=1, le=100),
+    user: dict = Depends(get_current_user),
+):
+    """
+    List all training jobs for this tenant (most recent first).
+    """
+    tenant_id = user["tenant_id"]
+    
+    jobs = job_queue.list_jobs(tenant_id, limit=limit)
+    
+    return success_response(data={
+        "jobs": jobs,
+        "count": len(jobs),
+        "tenant_id": tenant_id,
+    })
+
+
 # ── Score CSV ────────────────────────────────────────────────
 
 @router.post("/score")
@@ -770,6 +1167,7 @@ async def score_csv(
     file: Optional[UploadFile] = File(None),
     files: Optional[List[UploadFile]] = File(None),
     model_name: str = Query("default", description="Model to score with"),
+    auto_select_model: bool = Query(False, description="Auto-choose best model by schema compatibility"),
     include_engagement: bool = Query(True, description="Include engagement momentum scoring"),
     background_tasks: BackgroundTasks = BackgroundTasks(),
     user: dict = Depends(get_current_user),
@@ -782,19 +1180,34 @@ async def score_csv(
     - recommended_action: Based on 2x2 matrix of both scores
     """
     tenant_id = user["tenant_id"]
-    scorer = _get_model(tenant_id, model_name)
-
-    if not scorer:
-        return error_response("MODEL_NOT_FOUND", f"No model '{model_name}' found. Train first.", 404)
 
     try:
         dataset_names = _uploaded_dataset_names(file, files)
-        dfs = await _validate_and_read_files(file, files)
-        assets = _prepare_assets(dataset_names, dfs)
+        ingested_assets = await _validate_and_ingest_files(file, files)
+        assets = _prepare_assets(dataset_names, ingested_assets)
+        compression = _compression_summary(assets)
 
-        df, merge_plan = prepare_combined_dataset(assets)
-        results = _route_and_score_rows(tenant_id, model_name, scorer, df)
-        rank_tracking = _compare_against_previous_version(tenant_id, model_name, df, results)
+        df, merge_plan = _resolve_combined_dataset(assets, compression)
+        selected_model_name, scorer, model_selection = _choose_model_for_dataframe(
+            tenant_id,
+            requested_model=model_name,
+            df=df,
+            auto_select_model=auto_select_model,
+        )
+        if scorer is None or selected_model_name is None:
+            status_code = 409 if model_selection.get("status") == "no_confident_model_match" else 404
+            return error_response(
+                "MODEL_SELECTION_FAILED",
+                (
+                    "No confident model could be selected for this scoring payload."
+                    if status_code == 409
+                    else f"No model '{model_name}' found. Train first."
+                ),
+                status_code,
+            )
+
+        results = _route_and_score_rows(tenant_id, selected_model_name, scorer, df)
+        rank_tracking = _compare_against_previous_version(tenant_id, selected_model_name, df, results)
 
         routed_count = sum(1 for row in results if row.get("routing", {}).get("route_type") == "segment")
 
@@ -810,30 +1223,30 @@ async def score_csv(
             
             if engagement_analysis['detected_columns']:
                 # Score engagement for each lead
-                for i, result in enumerate(enriched_results):
-                    row = df.iloc[i] if i < len(df) else None
-                    if row is not None:
-                        eng_result = engagement_scorer.score_lead(row)
-                        profile_score = result.get('score', 0)
-                        engagement_score = eng_result.get('engagement_score')
-                        
-                        # Add engagement data to result
-                        result['profile_score'] = profile_score  # Rename for clarity
-                        result['engagement_score'] = engagement_score
-                        result['engagement_signals'] = eng_result.get('signals', {})
-                        result['engagement_band'] = eng_result.get('engagement_band')
-                        result['top_engagement_signals'] = eng_result.get('top_signals', [])
-                        
-                        # Get action recommendation
-                        action = action_recommender.recommend(profile_score, engagement_score)
-                        result['recommended_action'] = action['action']
-                        result['action_emoji'] = action['emoji']
-                        result['action_color'] = action['color']
-                        result['action_priority'] = action['priority']
-                        result['action_description'] = action['description']
-                        result['action_next_steps'] = action['next_steps']
-                        result['action_confidence'] = action['confidence']
-                        result['quadrant'] = action['quadrant']
+                for result in enriched_results:
+                    row_data = result.get("data", {})
+                    row = pd.Series(row_data)
+                    eng_result = engagement_scorer.score_lead(row)
+                    profile_score = result.get('score', 0)
+                    engagement_score = eng_result.get('engagement_score')
+                    
+                    # Add engagement data to result
+                    result['profile_score'] = profile_score  # Rename for clarity
+                    result['engagement_score'] = engagement_score
+                    result['engagement_signals'] = eng_result.get('signals', {})
+                    result['engagement_band'] = eng_result.get('engagement_band')
+                    result['top_engagement_signals'] = eng_result.get('top_signals', [])
+                    
+                    # Get action recommendation
+                    action = action_recommender.recommend(profile_score, engagement_score)
+                    result['recommended_action'] = action['action']
+                    result['action_emoji'] = action['emoji']
+                    result['action_color'] = action['color']
+                    result['action_priority'] = action['priority']
+                    result['action_description'] = action['description']
+                    result['action_next_steps'] = action['next_steps']
+                    result['action_confidence'] = action['confidence']
+                    result['quadrant'] = action['quadrant']
             else:
                 # No engagement columns found - add profile score only with action based on profile
                 for result in enriched_results:
@@ -855,19 +1268,21 @@ async def score_csv(
                     result['quadrant'] = action['quadrant']
 
         # Persist scores in background (doesn't slow response)
-        background_tasks.add_task(_persist_scores, tenant_id, model_name, enriched_results)
+        background_tasks.add_task(_persist_scores, tenant_id, selected_model_name, enriched_results)
 
-        logger.info("Scored %d leads: tenant=%s model=%s", len(enriched_results), tenant_id, model_name)
+        logger.info("Scored %d leads: tenant=%s model=%s", len(enriched_results), tenant_id, selected_model_name)
 
         response_data = {
             "status": "success",
-            "model_name": model_name,
+            "model_name": selected_model_name,
             "n_leads": len(enriched_results),
             "results": enriched_results,
             "rank_tracking": rank_tracking,
             "merge_plan": merge_plan,
+            "compression": compression,
+            "model_selection": model_selection,
             "routing_summary": {
-                "base_model": model_name,
+                "base_model": selected_model_name,
                 "segment_routed_rows": routed_count,
                 "base_routed_rows": len(enriched_results) - routed_count,
             },
@@ -906,11 +1321,13 @@ async def score_csv_legacy(
     file: Optional[UploadFile] = File(None),
     files: Optional[List[UploadFile]] = File(None),
     model_name: str = Query("default"),
+    auto_select_model: bool = Query(False),
+    include_engagement: bool = Query(True),
     background_tasks: BackgroundTasks = BackgroundTasks(),
     user: dict = Depends(get_current_user),
 ):
     """Legacy alias for /score. Kept for backward compatibility."""
-    return await score_csv(file, files, model_name, background_tasks, user)
+    return await score_csv(file, files, model_name, auto_select_model, include_engagement, background_tasks, user)
 
 
 # ── Analyze ──────────────────────────────────────────────────

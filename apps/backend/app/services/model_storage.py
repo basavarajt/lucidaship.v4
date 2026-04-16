@@ -25,6 +25,24 @@ def _tenant_dir(tenant_id: str) -> Path:
     return path
 
 
+def _versioned_candidates(directory: Path, model_name: str) -> List[Path]:
+    return sorted(
+        directory.glob(f"{model_name}__*.joblib"),
+        key=lambda candidate: candidate.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def _load_first_compatible(paths: List[Path]) -> UniversalAdaptiveScorer:
+    errors = []
+    for path in paths:
+        try:
+            return joblib.load(path)
+        except Exception as exc:
+            errors.append(f"{path.name}: {exc}")
+    raise RuntimeError("; ".join(errors) if errors else "No compatible model artifacts found")
+
+
 def save_model(model: UniversalAdaptiveScorer, tenant_id: str, model_name: str) -> str:
     """
     Save a trained model to disk.
@@ -54,9 +72,11 @@ def load_model(tenant_id: str, model_name: str) -> UniversalAdaptiveScorer:
     """
     directory = _tenant_dir(tenant_id)
     filepath = directory / f"{model_name}.joblib"
-    if not filepath.exists():
+    candidate_paths = [filepath] if filepath.exists() else []
+    candidate_paths.extend(_versioned_candidates(directory, model_name))
+    if not candidate_paths:
         raise FileNotFoundError(f"No model '{model_name}' found for tenant '{tenant_id}'")
-    model = joblib.load(filepath)
+    model = _load_first_compatible(candidate_paths)
     logger.info("Model loaded: tenant=%s model=%s", tenant_id, model_name)
     return model
 
@@ -125,7 +145,7 @@ def load_all_models() -> Dict[str, Dict[str, UniversalAdaptiveScorer]]:
             if "__" in model_name:
                 continue
             try:
-                model = joblib.load(model_file)
+                model = _load_first_compatible([model_file, *_versioned_candidates(tenant_dir, model_name)])
                 all_models[tenant_id][model_name] = model
                 logger.info("Loaded model on startup: tenant=%s model=%s", tenant_id, model_name)
             except Exception as e:

@@ -10,8 +10,9 @@ This module is intentionally cautious:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from difflib import SequenceMatcher
+from copy import deepcopy
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -19,10 +20,37 @@ import pandas as pd
 
 MIN_CONFIDENCE = 0.55
 MIN_COVERAGE = 0.10
+MAX_SAMPLE_ROWS = 5000  # Cap analysis to 5K rows for large datasets
+COLUMN_NAME_THRESHOLD = 0.3  # Skip column pairs with lower name similarity
+
 @dataclass
 class DatasetAsset:
     name: str
     df: pd.DataFrame
+    raw_df: Optional[pd.DataFrame] = None
+    protected_df: Optional[pd.DataFrame] = None
+    dequantized_df: Optional[pd.DataFrame] = None
+    compression: Dict = field(default_factory=dict)
+    execution_mode: str = "full"
+
+    def __post_init__(self):
+        if self.raw_df is None:
+            self.raw_df = self.df
+        if self.protected_df is None:
+            self.protected_df = self.raw_df
+        if self.dequantized_df is None:
+            self.dequantized_df = self.df
+
+    def for_execution(self) -> "DatasetAsset":
+        return DatasetAsset(
+            name=self.name,
+            df=self.dequantized_df if self.dequantized_df is not None else self.df,
+            raw_df=self.raw_df,
+            protected_df=self.protected_df,
+            dequantized_df=self.dequantized_df,
+            compression=self.compression,
+            execution_mode=self.execution_mode,
+        )
 
 
 def _normalize_name(value: str) -> str:
@@ -57,6 +85,21 @@ def _name_similarity(left: str, right: str) -> float:
 
 def _normalized_name_similarity(left: str, right: str) -> float:
     return SequenceMatcher(None, _normalize_name(left), _normalize_name(right)).ratio()
+
+
+def _analysis_df(asset: DatasetAsset) -> pd.DataFrame:
+    """Use the smallest lossless view that preserves join semantics.
+    For large datasets, sample rows to speed up analysis.
+    """
+    if asset.protected_df is not None and len(asset.protected_df.columns) > 0:
+        df = asset.protected_df
+    else:
+        df = asset.df
+    
+    # Sample large datasets to MAX_SAMPLE_ROWS for faster analysis
+    if len(df) > MAX_SAMPLE_ROWS:
+        return df.sample(n=MAX_SAMPLE_ROWS, random_state=42)
+    return df
 
 
 def _value_overlap(left: pd.Series, right: pd.Series, normalized: bool = False) -> float:
@@ -159,8 +202,15 @@ def score_column_pair(
     left_series = left_df[left_col]
     right_series = right_df[right_col]
 
+    # Fast name similarity check - skip low-scoring pairs early
     name_score = _name_similarity(left_col, right_col)
     normalized_name_score = _normalized_name_similarity(left_col, right_col)
+    max_name_score = max(name_score, normalized_name_score)
+    
+    # Aggressive early termination for obviously unrelated columns
+    if max_name_score < COLUMN_NAME_THRESHOLD and _type_family(left_series) != _type_family(right_series):
+        return None  # Skip this pair entirely
+    
     raw_overlap = _value_overlap(left_series, right_series, normalized=False)
     normalized_overlap = _value_overlap(left_series, right_series, normalized=True)
     statistical_score = _statistical_similarity(left_series, right_series)
@@ -169,7 +219,7 @@ def score_column_pair(
     type_penalty = 0.0 if _type_family(left_series) == _type_family(right_series) else 0.15
 
     confidence = (
-        (max(name_score, normalized_name_score) * 0.2)
+        (max_name_score * 0.2)
         + (raw_overlap * 0.2)
         + (normalized_overlap * 0.3)
         + (statistical_score * 0.2)
@@ -191,13 +241,26 @@ def score_column_pair(
     }
 
 
-def analyze_dataset_pair(left: DatasetAsset, right: DatasetAsset, top_n: int = 5) -> Dict:
+def analyze_dataset_pair(left: DatasetAsset, right: DatasetAsset, top_n: int = 3) -> Dict:
+    """Analyze dataset pair for join relationships.
+    Reduced top_n from 5 to 3 for faster analysis.
+    Early termination once good candidate found.
+    """
+    left_df = _analysis_df(left)
+    right_df = _analysis_df(right)
     candidates: List[Dict] = []
-    for left_col in left.df.columns:
-        for right_col in right.df.columns:
-            candidate = score_column_pair(left.df, right.df, left_col, right_col)
+    
+    for left_col in left_df.columns:
+        for right_col in right_df.columns:
+            candidate = score_column_pair(left_df, right_df, left_col, right_col)
+            if candidate is None:  # Skipped due to early termination
+                continue
             if candidate["confidence"] >= 0.25:
                 candidates.append(candidate)
+        
+        # Early termination: if we found a high-quality match, stop searching
+        if candidates and max(c["confidence"] for c in candidates) >= 0.85:
+            break
 
     ranked = sorted(
         candidates,
@@ -221,11 +284,33 @@ def analyze_dataset_pair(left: DatasetAsset, right: DatasetAsset, top_n: int = 5
 
 
 def analyze_dataset_collection(assets: List[DatasetAsset]) -> Dict:
-    profiles = [profile_dataset(asset.name, asset.df) for asset in assets]
-    pairwise = []
-    for i in range(len(assets)):
-        for j in range(i + 1, len(assets)):
-            pairwise.append(analyze_dataset_pair(assets[i], assets[j]))
+    """Analyze collection of datasets with fast-path detection.
+    Skip expensive profiling if all schemas are identical.
+    """
+    # Fast-path: if all datasets have identical columns, skip detailed profiling
+    col_sets = [set(asset.df.columns) for asset in assets]
+    all_identical = all(c == col_sets[0] for c in col_sets)
+    
+    if all_identical:
+        # Skip expensive column profiling
+        profiles = [
+            {
+                "name": asset.name,
+                "rows": int(len(asset.df)),
+                "columns": int(len(asset.df.columns)),
+                "column_profiles": [],  # Empty: already identical
+            }
+            for asset in assets
+        ]
+        pairwise = [{"left_dataset": assets[i].name, "right_dataset": assets[j].name, "recommended_join": None, "should_consider_merge": False} 
+                    for i in range(len(assets)) for j in range(i + 1, len(assets))]
+    else:
+        profiles = [profile_dataset(asset.name, asset.df) for asset in assets]
+        pairwise = []
+        for i in range(len(assets)):
+            for j in range(i + 1, len(assets)):
+                pairwise.append(analyze_dataset_pair(assets[i], assets[j]))
+    
     return {
         "datasets": profiles,
         "relationships": pairwise,
@@ -257,10 +342,19 @@ def _merge_with_candidate(base_df: pd.DataFrame, asset: DatasetAsset, candidate:
     join_shape = candidate["join_shape"]
 
     if join_shape == "many_to_many":
-        raise ValueError(
-            f"Unsafe many-to-many join detected between '{left_col}' and '{right_col}'. "
-            "Aggregate one side before merging."
-        )
+        # Protect against row-explosion by aggregating the incoming dataset to key grain.
+        prepared = _aggregate_for_join(asset.df, right_col, asset.name)
+        merged = base_df.merge(prepared, left_on=left_col, right_on=right_col, how="left")
+        return merged, {
+            "dataset": asset.name,
+            "strategy": "aggregate_many_to_many_right",
+            "left_column": left_col,
+            "right_column": right_col,
+            "join_shape": join_shape,
+            "confidence": candidate["confidence"],
+            "coverage": candidate["coverage"],
+            "warning": "many_to_many_detected_aggregated_right_side",
+        }
 
     if join_shape == "one_to_many":
         prepared = _aggregate_for_join(asset.df, right_col, asset.name)
@@ -299,13 +393,46 @@ def build_merge_plan(assets: List[DatasetAsset]) -> Dict:
             "warnings": [],
         }
 
+    # Fast-path detection: look for obvious common ID columns before expensive analysis
+    common_cols = set(assets[0].df.columns)
+    for asset in assets[1:]:
+        common_cols &= set(asset.df.columns)
+    
+    id_keywords = ['id', 'email', 'key', 'contact', 'prospect', 'lead_id', 'customer_id']
+    common_ids = [col for col in common_cols if any(kw in col.lower() for kw in id_keywords)]
+    
+    if common_ids:
+        # Found obvious ID columns - use first one without scoring
+        base_asset = assets[0]
+        remaining = [asset for asset in assets if asset.name != base_asset.name]
+        steps = []
+        
+        id_col = common_ids[0]  # Use most obvious ID column
+        for asset in remaining:
+            steps.append({
+                "dataset": asset.name,
+                "left_column": id_col,
+                "right_column": id_col,
+                "join_shape": "one_to_many",
+                "confidence": 1.0,
+                "coverage": 1.0,
+                "note": "Direct ID match detected",
+            })
+        
+        return {
+            "strategy": "fast_path_direct_id",
+            "base_dataset": base_asset.name,
+            "steps": steps,
+            "warnings": [f"Using fast-path ID join on column '{id_col}' (skipped expensive analysis)"],
+        }
+    
+    # Slower path: relationship-guided merge planning with detailed analysis
     relationships = analyze_dataset_collection(assets)["relationships"]
     by_pair = {
         (rel["left_dataset"], rel["right_dataset"]): rel
         for rel in relationships
     }
 
-    # Anchor on the first uploaded dataset so the user controls the entity grain.
     base_asset = assets[0]
     remaining = [asset for asset in assets if asset.name != base_asset.name]
     steps = []
@@ -350,6 +477,40 @@ def build_merge_plan(assets: List[DatasetAsset]) -> Dict:
     }
 
 
+def execute_merge_plan(assets: List[DatasetAsset], plan: Dict) -> Tuple[pd.DataFrame, Dict]:
+    if not assets:
+        return pd.DataFrame(), {"strategy": "empty", "steps": [], "warnings": ["No datasets provided."]}
+
+    execution_plan = deepcopy(plan)
+    if execution_plan.get("strategy") == "single_dataset":
+        base_asset = next(asset for asset in assets if asset.name == execution_plan["base_dataset"])
+        execution_plan["executed_steps"] = []
+        execution_plan["input_rows"] = {asset.name: int(len(asset.df)) for asset in assets}
+        execution_plan["result_shape"] = {"rows": int(len(base_asset.df)), "columns": int(len(base_asset.df.columns))}
+        return base_asset.df.copy(), execution_plan
+
+    if execution_plan.get("strategy") == "row_concat":
+        combined = pd.concat([asset.df for asset in assets], ignore_index=True)
+        execution_plan["executed_steps"] = execution_plan.get("steps", [])
+        execution_plan["input_rows"] = {asset.name: int(len(asset.df)) for asset in assets}
+        execution_plan["result_shape"] = {"rows": int(len(combined)), "columns": int(len(combined.columns))}
+        return combined, execution_plan
+
+    base_asset = next(asset for asset in assets if asset.name == execution_plan["base_dataset"])
+    combined = base_asset.df.copy()
+    execution_steps = []
+
+    for step in execution_plan.get("steps", []):
+        asset = next(asset for asset in assets if asset.name == step["dataset"])
+        combined, executed = _merge_with_candidate(combined, asset, step)
+        execution_steps.append(executed)
+
+    execution_plan["executed_steps"] = execution_steps
+    execution_plan["input_rows"] = {asset.name: int(len(asset.df)) for asset in assets}
+    execution_plan["result_shape"] = {"rows": int(len(combined)), "columns": int(len(combined.columns))}
+    return combined, execution_plan
+
+
 def prepare_combined_dataset(assets: List[DatasetAsset]) -> Tuple[pd.DataFrame, Dict]:
     if not assets:
         return pd.DataFrame(), {"strategy": "empty", "steps": [], "warnings": ["No datasets provided."]}
@@ -362,26 +523,18 @@ def prepare_combined_dataset(assets: List[DatasetAsset]) -> Tuple[pd.DataFrame, 
             "warnings": [],
         }
 
-    if all(set(asset.df.columns) == set(assets[0].df.columns) for asset in assets[1:]):
+    # Fast-path: identical schemas → direct concatenation (skip expensive merge planning)
+    col_sets = [set(asset.df.columns) for asset in assets]
+    if all(c == col_sets[0] for c in col_sets):
         combined = pd.concat([asset.df for asset in assets], ignore_index=True)
         return combined, {
             "strategy": "row_concat",
             "base_dataset": assets[0].name,
             "steps": [{"dataset": asset.name, "strategy": "concat"} for asset in assets[1:]],
             "warnings": [],
+            "performance_note": "Skipped expensive merge analysis due to identical schemas",
         }
 
+    # Slower path: different schemas → intelligent merge planning
     plan = build_merge_plan(assets)
-    base_asset = next(asset for asset in assets if asset.name == plan["base_dataset"])
-    combined = base_asset.df.copy()
-    execution_steps = []
-
-    for step in plan["steps"]:
-        asset = next(asset for asset in assets if asset.name == step["dataset"])
-        combined, executed = _merge_with_candidate(combined, asset, step)
-        execution_steps.append(executed)
-
-    plan["executed_steps"] = execution_steps
-    plan["input_rows"] = {asset.name: int(len(asset.df)) for asset in assets}
-    plan["result_shape"] = {"rows": int(len(combined)), "columns": int(len(combined.columns))}
-    return combined, plan
+    return execute_merge_plan(assets, plan)

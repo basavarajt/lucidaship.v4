@@ -12,15 +12,18 @@ Base URL: `http://localhost:8000`
 - `POST /train`
   - multipart: `file` or `files`
   - query: `model_name`, optional `target_column`
-  - returns: model analysis, target diagnostics, feature blueprint, metrics
+  - returns: model analysis, target diagnostics, feature blueprint, metrics, optional upload compression diagnostics
 - `POST /score`
   - multipart: `file` or `files`
   - query: `model_name`
-  - returns: ranked results, rationale, score-time routing metadata, and optional rank movement against previous model version
+  - returns: ranked results, rationale, score-time routing metadata, optional upload compression diagnostics, and optional rank movement against previous model version
 - `POST /score-csv`
   - legacy alias of `/score`
 - `POST /analyze`
   - multipart: `file`
+- `POST /merge-plan`
+  - multipart: `file` or `files`
+  - returns: relationship analysis, merge plan, and optional upload compression diagnostics
 - `POST /feedback`
   - multipart: `file`
   - query: `model_name`, optional `outcome_column`, optional `auto_retrain`, optional `feedback_weight`

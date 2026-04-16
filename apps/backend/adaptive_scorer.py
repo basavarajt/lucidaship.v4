@@ -8,21 +8,29 @@ Universal Adaptive Lead Scorer
 - No configuration needed
 """
 
+import os
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple, Optional
 import warnings
 warnings.filterwarnings('ignore')
+os.environ.setdefault("LOKY_MAX_CPU_COUNT", "1")
+os.environ.setdefault("JOBLIB_MULTIPROCESSING", "0")
 
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 from sklearn.feature_selection import mutual_info_classif
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import roc_auc_score, accuracy_score, precision_score, recall_score
+from sklearn.metrics import roc_auc_score, accuracy_score, precision_score, recall_score, brier_score_loss
 from sklearn.calibration import CalibratedClassifierCV
-from imblearn.over_sampling import SMOTE
+from imblearn.over_sampling import ADASYN, SMOTE
 from scipy.stats import spearmanr
 import joblib
+
+try:
+    from sklearn.frozen import FrozenEstimator
+except Exception:
+    FrozenEstimator = None
 
 try:
     from xgboost import XGBClassifier
@@ -39,6 +47,64 @@ try:
     from sklearn.decomposition import PCA
 except:
     SentenceTransformer = None
+
+
+RF_N_JOBS = max(1, int(os.getenv("LUCIDA_RF_N_JOBS", "1")))
+NULL_LIKE_TOKENS = {"", "nan", "none", "null", "n/a", "na"}
+POSITIVE_BINARY_TOKENS = {"1", "yes", "true", "won", "converted", "y", "success"}
+
+
+def _safe_to_datetime(series: pd.Series) -> pd.Series:
+    """Use pandas mixed parsing to avoid noisy format inference warnings."""
+    return pd.to_datetime(series, errors='coerce', format='mixed')
+
+
+def _normalize_binary_token(value) -> Optional[str]:
+    """Normalize raw values so binary detection is robust to nulls/whitespace/mixed types."""
+    if pd.isna(value):
+        return None
+
+    if isinstance(value, (bool, np.bool_)):
+        return "1" if bool(value) else "0"
+
+    if isinstance(value, (int, np.integer)):
+        return str(int(value))
+
+    if isinstance(value, (float, np.floating)):
+        if not np.isfinite(value):
+            return None
+        rounded = round(float(value))
+        if abs(float(value) - rounded) < 1e-9:
+            return str(int(rounded))
+        return f"{float(value):g}"
+
+    token = str(value).strip().lower()
+    if token in NULL_LIKE_TOKENS:
+        return None
+
+    try:
+        numeric_value = float(token)
+        if np.isfinite(numeric_value):
+            rounded = round(numeric_value)
+            if abs(numeric_value - rounded) < 1e-9:
+                return str(int(rounded))
+            return f"{numeric_value:g}"
+    except Exception:
+        pass
+
+    return token
+
+
+def _normalized_binary_series(series: pd.Series) -> pd.Series:
+    normalized = series.map(_normalize_binary_token)
+    return normalized.dropna()
+
+
+def _is_binary_series(series: pd.Series) -> bool:
+    non_null = _normalized_binary_series(series)
+    if non_null.empty:
+        return False
+    return bool(non_null.nunique() == 2)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -66,42 +132,50 @@ class DataAnalyzer:
         Safely convert any binary column (Yes/No, True/False, 0/1, Won/Lost)
         to numeric 0/1. Stores the mapping for reuse.
         """
-        series = self.df[col].fillna(self.df[col].mode().iloc[0] if len(self.df[col].mode()) > 0 else 0)
-        # If already numeric 0/1, return directly
-        if series.dtype in ['int64', 'float64']:
-            return series.astype(int)
-        # Map the two unique string values to 0 and 1
-        unique_vals = sorted(series.unique())
-        # Heuristic: common "positive" values get 1
-        pos_vals = {'yes', 'true', '1', 'won', 'converted', 'y', 'success'}
-        if str(unique_vals[0]).lower() in pos_vals:
+        normalized = self.df[col].map(_normalize_binary_token)
+        non_null = normalized.dropna()
+        unique_vals = sorted(non_null.unique())
+        if len(unique_vals) != 2:
+            raise ValueError(
+                f"Column '{col}' is not binary after normalization "
+                f"(found {len(unique_vals)} unique non-null values)."
+            )
+
+        # Heuristic: common positive values map to 1.
+        if unique_vals[0] in POSITIVE_BINARY_TOKENS and unique_vals[1] not in POSITIVE_BINARY_TOKENS:
             mapping = {unique_vals[0]: 1, unique_vals[1]: 0}
-        elif str(unique_vals[1]).lower() in pos_vals:
+        elif unique_vals[1] in POSITIVE_BINARY_TOKENS and unique_vals[0] not in POSITIVE_BINARY_TOKENS:
             mapping = {unique_vals[0]: 0, unique_vals[1]: 1}
         else:
-            mapping = {unique_vals[0]: 0, unique_vals[1]: 1}
+            mapping = {unique_vals[0]: 0, unique_vals[1]: 1}  # deterministic fallback
+
         self.binary_encoders[col] = mapping
-        return series.map(mapping).astype(int)
+        encoded = normalized.map(mapping)
+        if encoded.isna().all():
+            return pd.Series(0, index=self.df.index, dtype=int)
+        fill_value = int(encoded.dropna().mode().iloc[0]) if not encoded.dropna().empty else 0
+        return encoded.fillna(fill_value).astype(int)
 
     def encode_binary_series(self, col: str, series: pd.Series) -> pd.Series:
         """Encode a binary series using stored mapping from training where possible."""
-        filled = series.fillna(self.df[col].mode().iloc[0] if col in self.df.columns and len(self.df[col].mode()) > 0 else 0)
-        if filled.dtype in ['int64', 'float64']:
-            return filled.astype(int)
-
+        normalized = series.map(_normalize_binary_token)
         mapping = self.binary_encoders.get(col)
         if mapping is None:
-            unique_vals = sorted(filled.unique())
+            unique_vals = sorted(normalized.dropna().unique())
             if len(unique_vals) != 2:
                 raise ValueError(f"Column '{col}' is not binary in provided series.")
-            pos_vals = {'yes', 'true', '1', 'won', 'converted', 'y', 'success'}
-            if str(unique_vals[0]).lower() in pos_vals:
+            if unique_vals[0] in POSITIVE_BINARY_TOKENS and unique_vals[1] not in POSITIVE_BINARY_TOKENS:
                 mapping = {unique_vals[0]: 1, unique_vals[1]: 0}
-            elif str(unique_vals[1]).lower() in pos_vals:
+            elif unique_vals[1] in POSITIVE_BINARY_TOKENS and unique_vals[0] not in POSITIVE_BINARY_TOKENS:
                 mapping = {unique_vals[0]: 0, unique_vals[1]: 1}
             else:
                 mapping = {unique_vals[0]: 0, unique_vals[1]: 1}
-        return filled.map(mapping).astype(int)
+
+        encoded = normalized.map(mapping)
+        if encoded.isna().all():
+            return pd.Series(0, index=series.index, dtype=int)
+        fill_value = int(encoded.dropna().mode().iloc[0]) if not encoded.dropna().empty else 0
+        return encoded.fillna(fill_value).astype(int)
 
     def infer_column_types(self) -> Dict[str, str]:
         """
@@ -126,10 +200,14 @@ class DataAnalyzer:
                 types[col] = 'ignore'
                 continue
 
+            if _is_binary_series(col_data):
+                types[col] = 'binary'
+                continue
+
             # Try datetime parsing
             if col_data.dtype == 'object':
                 try:
-                    parsed_dates = pd.to_datetime(col_data.dropna(), errors='coerce')
+                    parsed_dates = _safe_to_datetime(col_data.dropna())
                     valid_ratio = parsed_dates.notna().sum() / len(col_data.dropna())
                     if valid_ratio > 0.8:
                         types[col] = 'temporal'
@@ -189,9 +267,12 @@ class DataAnalyzer:
         ]
 
         if not binary_cols:
-            raise ValueError(
-                "No binary column found. Ensure at least one column has exactly 2 unique values."
-            )
+            synthetic_target = self._create_synthetic_target()
+            self.target_scores = {synthetic_target: 0.0}
+            self.target_col = synthetic_target
+            self.is_binary_target = True
+            self.target_diagnostics = self.get_target_diagnostics()
+            return synthetic_target
 
         # Score each by correlation with numerics
         scores = {}
@@ -218,6 +299,40 @@ class DataAnalyzer:
         self.is_binary_target = True
         self.target_diagnostics = self.get_target_diagnostics()
         return target
+
+    def _create_synthetic_target(self) -> str:
+        """Create a deterministic pseudo-target so supervised training can proceed."""
+        target_name = "__synthetic_target__"
+
+        numeric_candidates = [
+            col for col, type_ in self.column_types.items()
+            if type_ == "numeric" and self.df[col].dropna().nunique() > 1
+        ]
+
+        if numeric_candidates:
+            best_col = max(
+                numeric_candidates,
+                key=lambda c: float(self.df[c].fillna(self.df[c].median()).std() or 0.0),
+            )
+            ranked = self.df[best_col].fillna(self.df[best_col].median()).rank(method="first", pct=True)
+            self.df[target_name] = (ranked >= 0.5).astype(int)
+        else:
+            categorical_candidates = [
+                col for col, type_ in self.column_types.items()
+                if type_ in {"categorical", "text"} and self.df[col].dropna().nunique() > 1
+            ]
+            if categorical_candidates:
+                best_col = max(categorical_candidates, key=lambda c: int(self.df[c].nunique(dropna=True)))
+                normalized = self.df[best_col].fillna("unknown").astype(str).str.strip().str.lower()
+                hashed = pd.util.hash_pandas_object(normalized, index=False).astype("int64")
+                ranked = pd.Series(hashed, index=self.df.index).rank(method="first", pct=True)
+                self.df[target_name] = (ranked >= 0.5).astype(int)
+            else:
+                # Last resort: stable balanced split.
+                self.df[target_name] = (self.df.index.to_series().rank(method="first", pct=True) >= 0.5).astype(int)
+
+        self.column_types[target_name] = "binary"
+        return target_name
 
     def get_target_diagnostics(self) -> Dict:
         """Summarize how confident the engine is about target detection."""
@@ -252,6 +367,8 @@ class DataAnalyzer:
         recommendation = "strong_auto_target"
         if review_flags:
             recommendation = "manual_review_recommended"
+        if self.target_col == "__synthetic_target__":
+            recommendation = "synthetic_target_created"
 
         return {
             "selected_target": str(self.target_col),
@@ -262,6 +379,7 @@ class DataAnalyzer:
             "class_balance": class_counts,
             "review_flags": review_flags,
             "recommendation": recommendation,
+            "target_source": "synthetic" if self.target_col == "__synthetic_target__" else "detected_or_provided",
         }
 
     def compute_feature_importance(self) -> Dict[str, float]:
@@ -308,7 +426,7 @@ class DataAnalyzer:
             if type_ == 'temporal':
                 try:
                     df_temp = self.df.copy()
-                    df_temp[col] = pd.to_datetime(df_temp[col], errors='coerce')
+                    df_temp[col] = _safe_to_datetime(df_temp[col])
                     today = pd.Timestamp.today()
                     days_ago = (today - df_temp[col]).dt.days
                     median_days = days_ago.dropna().median()
@@ -476,7 +594,7 @@ class AdaptiveFeatureEngineering:
             for col in temporal_cols:
                 try:
                     df_temp = self.df.copy()
-                    df_temp[col] = pd.to_datetime(df_temp[col], errors='coerce')
+                    df_temp[col] = _safe_to_datetime(df_temp[col])
                     today = pd.Timestamp.today()
                     days_ago = (today - df_temp[col]).dt.days
                     median_days = days_ago.dropna().median()
@@ -555,7 +673,7 @@ class AdaptiveFeatureEngineering:
                 if col in df_new.columns:
                     try:
                         df_temp = df_new.copy()
-                        df_temp[col] = pd.to_datetime(df_temp[col], errors='coerce')
+                        df_temp[col] = _safe_to_datetime(df_temp[col])
                         today = pd.Timestamp.today()
                         days_ago = (today - df_temp[col]).dt.days
                         X[f"{col}_missing"] = days_ago.isna().astype(int)
@@ -606,6 +724,9 @@ class AdaptiveLeadScorer:
         self.feature_baselines = {}
         self.ranking_version = "lucida_rank_v2"
         self.rationale_version = "lucida_rationale_v2"
+        self.model_family = None
+        self.decision_threshold = 0.5
+        self.training_diagnostics = {}
 
     def _precision_at_percent(self, y_true: np.ndarray, y_scores: np.ndarray, percent: float) -> float:
         top_n = max(1, int(np.ceil(len(y_scores) * percent)))
@@ -617,6 +738,199 @@ class AdaptiveLeadScorer:
         if baseline == 0:
             return 0.0
         return float(self._precision_at_percent(y_true, y_scores, percent) / baseline)
+
+    def _expected_calibration_error(self, y_true: np.ndarray, y_scores: np.ndarray, bins: int = 10) -> float:
+        if len(y_true) == 0:
+            return 0.0
+
+        y_true = np.asarray(y_true, dtype=float)
+        y_scores = np.asarray(y_scores, dtype=float)
+        edges = np.linspace(0.0, 1.0, bins + 1)
+        ece = 0.0
+
+        for idx in range(bins):
+            left = edges[idx]
+            right = edges[idx + 1]
+            if idx == bins - 1:
+                mask = (y_scores >= left) & (y_scores <= right)
+            else:
+                mask = (y_scores >= left) & (y_scores < right)
+            if not np.any(mask):
+                continue
+            bucket_confidence = float(np.mean(y_scores[mask]))
+            bucket_accuracy = float(np.mean(y_true[mask]))
+            ece += (np.sum(mask) / len(y_scores)) * abs(bucket_accuracy - bucket_confidence)
+
+        return float(ece)
+
+    def _target_sampling_ratio(self, y_train: np.ndarray) -> float:
+        positives = int(np.sum(y_train))
+        negatives = int(len(y_train) - positives)
+        if positives == 0 or negatives == 0:
+            return 1.0
+        minority = min(positives, negatives)
+        majority = max(positives, negatives)
+        current_ratio = minority / majority
+        # Avoid the common 1:1 oversampling trap on CRM-style low-conversion data.
+        return float(max(current_ratio, 1 / 6.6))
+
+    def _resample_training_data(self, X_train: pd.DataFrame, y_train: np.ndarray) -> Tuple[pd.DataFrame, np.ndarray, Dict]:
+        positives = int(np.sum(y_train))
+        negatives = int(len(y_train) - positives)
+        minority = min(positives, negatives)
+        majority = max(positives, negatives)
+
+        diagnostics = {
+            "strategy": "none",
+            "sampling_ratio": float(minority / majority) if majority else 0.0,
+            "rows_before": int(len(X_train)),
+            "rows_after": int(len(X_train)),
+        }
+
+        if minority < 6 or majority == 0:
+            diagnostics["reason"] = "too_few_minority_examples"
+            return X_train, y_train, diagnostics
+
+        target_ratio = self._target_sampling_ratio(y_train)
+        current_ratio = minority / majority
+        if current_ratio >= target_ratio:
+            diagnostics["reason"] = "class_ratio_already_acceptable"
+            return X_train, y_train, diagnostics
+
+        neighbors = min(5, minority - 1)
+        samplers = [
+            ("adasyn", ADASYN(random_state=42, n_neighbors=neighbors, sampling_strategy=target_ratio)),
+            ("smote", SMOTE(random_state=42, k_neighbors=neighbors, sampling_strategy=target_ratio)),
+        ]
+
+        for name, sampler in samplers:
+            try:
+                X_res, y_res = sampler.fit_resample(X_train, y_train)
+                resampled_positives = int(np.sum(y_res))
+                resampled_negatives = int(len(y_res) - resampled_positives)
+                resampled_minority = min(resampled_positives, resampled_negatives)
+                resampled_majority = max(resampled_positives, resampled_negatives)
+                diagnostics.update({
+                    "strategy": name,
+                    "sampling_ratio": float(resampled_minority / resampled_majority) if resampled_majority else 0.0,
+                    "rows_after": int(len(X_res)),
+                    "target_ratio": float(target_ratio),
+                })
+                return X_res, y_res, diagnostics
+            except Exception:
+                continue
+
+        diagnostics["reason"] = "resampling_failed"
+        diagnostics["target_ratio"] = float(target_ratio)
+        return X_train, y_train, diagnostics
+
+    def _calibrate_model(self, estimator, X_calibration: pd.DataFrame, y_calibration: np.ndarray):
+        try:
+            if FrozenEstimator is not None:
+                calibrated = CalibratedClassifierCV(FrozenEstimator(estimator), method="sigmoid")
+            else:
+                calibrated = CalibratedClassifierCV(estimator, method="sigmoid", cv="prefit")
+            calibrated.fit(X_calibration, y_calibration)
+            return calibrated
+        except Exception:
+            return None
+
+    def _candidate_models(self, y_train: np.ndarray) -> List[Tuple[str, object]]:
+        positives = max(1, int(np.sum(y_train)))
+        negatives = max(1, int(len(y_train) - positives))
+        scale_pos_weight = negatives / positives
+
+        candidates = [
+            (
+                "gradient_boosting",
+                GradientBoostingClassifier(
+                    n_estimators=160,
+                    learning_rate=0.05,
+                    max_depth=3,
+                    subsample=0.9,
+                    random_state=42,
+                ),
+            ),
+            (
+                "random_forest",
+                RandomForestClassifier(
+                    n_estimators=200,
+                    max_depth=8,
+                    random_state=42,
+                    n_jobs=RF_N_JOBS,
+                    class_weight="balanced_subsample",
+                ),
+            ),
+        ]
+
+        if XGBClassifier is not None:
+            candidates.insert(
+                0,
+                (
+                    "xgboost",
+                    XGBClassifier(
+                        n_estimators=220,
+                        max_depth=4,
+                        learning_rate=0.05,
+                        subsample=0.9,
+                        colsample_bytree=0.8,
+                        reg_lambda=1.0,
+                        min_child_weight=2,
+                        eval_metric="logloss",
+                        random_state=42,
+                        n_jobs=RF_N_JOBS,
+                        scale_pos_weight=scale_pos_weight,
+                    ),
+                ),
+            )
+
+        return candidates
+
+    def _optimize_threshold(self, y_true: np.ndarray, y_scores: np.ndarray) -> Dict[str, float]:
+        if len(y_true) == 0:
+            return {
+                "threshold": 0.5,
+                "accuracy": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+            }
+
+        candidate_thresholds = np.unique(np.clip(np.round(y_scores, 3), 0.05, 0.95))
+        candidate_thresholds = np.unique(np.concatenate([candidate_thresholds, np.array([0.2, 0.3, 0.4, 0.5])]))
+
+        baseline_pred = (y_scores >= 0.5).astype(int)
+        baseline_recall = recall_score(y_true, baseline_pred, zero_division=0)
+
+        best = None
+        for threshold in candidate_thresholds:
+            y_pred = (y_scores >= threshold).astype(int)
+            accuracy = accuracy_score(y_true, y_pred)
+            precision = precision_score(y_true, y_pred, zero_division=0)
+            recall = recall_score(y_true, y_pred, zero_division=0)
+            # Prefer better recall on costly false negatives, but never at the cost of a large accuracy drop.
+            score = (
+                (accuracy * 0.55)
+                + (recall * 0.35)
+                + (precision * 0.10)
+                - max(0.0, baseline_recall - recall) * 0.25
+            )
+            candidate = {
+                "threshold": float(threshold),
+                "accuracy": float(accuracy),
+                "precision": float(precision),
+                "recall": float(recall),
+                "objective": float(score),
+            }
+            if best is None or candidate["objective"] > best["objective"]:
+                best = candidate
+
+        return best or {
+            "threshold": 0.5,
+            "accuracy": float(accuracy_score(y_true, baseline_pred)),
+            "precision": float(precision_score(y_true, baseline_pred, zero_division=0)),
+            "recall": float(baseline_recall),
+            "objective": 0.0,
+        }
 
     def train(
         self,
@@ -634,37 +948,83 @@ class AdaptiveLeadScorer:
         """
         self.feature_names = X_train.columns.tolist()
 
-        # Balance
         try:
-            smote = SMOTE(random_state=42, k_neighbors=min(5, sum(y_train) - 1))
-            X_res, y_res = smote.fit_resample(X_train, y_train)
-        except:
-            X_res, y_res = X_train, y_train
-
-        # Train RF (simple, explainable)
-        self.model = RandomForestClassifier(
-            n_estimators=100,
-            max_depth=8,
-            random_state=42,
-            n_jobs=-1
-        )
-        self.model.fit(X_res, y_res)
-
-        try:
-            self.calibrated_model = CalibratedClassifierCV(self.model, method="sigmoid", cv="prefit")
-            self.calibrated_model.fit(X_train, y_train)
+            model_train_X, calibration_X, model_train_y, calibration_y = train_test_split(
+                X_train,
+                y_train,
+                test_size=0.25,
+                random_state=42,
+                stratify=y_train,
+            )
         except Exception:
-            self.calibrated_model = None
+            model_train_X, calibration_X, model_train_y, calibration_y = X_train, X_train, y_train, y_train
+        X_res, y_res, resampling_diagnostics = self._resample_training_data(model_train_X, model_train_y)
+
+        candidate_results = []
+        for candidate_name, estimator in self._candidate_models(model_train_y):
+            try:
+                estimator.fit(X_res, y_res)
+                calibrated = self._calibrate_model(estimator, calibration_X, calibration_y)
+                predictor = calibrated or estimator
+                calibration_scores = predictor.predict_proba(calibration_X)[:, 1]
+                candidate_results.append(
+                    {
+                        "name": candidate_name,
+                        "estimator": estimator,
+                        "calibrated": calibrated,
+                        "lift_at_20_percent": float(self._lift_at_percent(calibration_y, calibration_scores, 0.20)),
+                        "roc_auc": float(roc_auc_score(calibration_y, calibration_scores)),
+                        "brier_score": float(brier_score_loss(calibration_y, calibration_scores)),
+                        "ece": float(self._expected_calibration_error(calibration_y, calibration_scores)),
+                    }
+                )
+            except Exception:
+                continue
+
+        if not candidate_results:
+            raise ValueError("Model training failed for every candidate estimator.")
+
+        candidate_results.sort(
+            key=lambda item: (
+                item["lift_at_20_percent"],
+                item["roc_auc"],
+                -item["brier_score"],
+                -item["ece"],
+            ),
+            reverse=True,
+        )
+
+        best_candidate = candidate_results[0]
+        self.model = best_candidate["estimator"]
+        self.calibrated_model = best_candidate["calibrated"]
+        self.model_family = best_candidate["name"]
 
         self.explainer = None
         explanation_method = 'tree_shap' if self._get_explainer() is not None else 'feature_importance_fallback'
 
         # Evaluate
         predictor = self.calibrated_model or self.model
-        y_pred = predictor.predict(X_eval)
         y_proba = predictor.predict_proba(X_eval)[:, 1]
+        threshold_metrics = self._optimize_threshold(y_eval, y_proba)
+        self.decision_threshold = float(threshold_metrics["threshold"])
+        y_pred = (y_proba >= self.decision_threshold).astype(int)
         self.feature_importances = self.model.feature_importances_.tolist()
         self.feature_baselines = feature_baselines or X_train.mean(numeric_only=True).fillna(0).to_dict()
+        self.training_diagnostics = {
+            "resampling": resampling_diagnostics,
+            "candidate_models": [
+                {
+                    "name": item["name"],
+                    "lift_at_20_percent": item["lift_at_20_percent"],
+                    "roc_auc": item["roc_auc"],
+                    "brier_score": item["brier_score"],
+                    "ece": item["ece"],
+                }
+                for item in candidate_results
+            ],
+            "selected_model": best_candidate["name"],
+            "recommended_threshold": self.decision_threshold,
+        }
 
         self.metadata = {
             'client_id': client_id,
@@ -672,12 +1032,14 @@ class AdaptiveLeadScorer:
             'feature_names': self.feature_names,
             'accuracy': float(accuracy_score(y_eval, y_pred)),
             'roc_auc': float(roc_auc_score(y_eval, y_proba)),
-            'precision': float(precision_score(y_eval, y_pred, zero_division=0)),
-            'recall': float(recall_score(y_eval, y_pred, zero_division=0)),
+            'precision': float(threshold_metrics['precision']),
+            'recall': float(threshold_metrics['recall']),
             'precision_at_10_percent': float(self._precision_at_percent(y_eval, y_proba, 0.10)),
             'precision_at_20_percent': float(self._precision_at_percent(y_eval, y_proba, 0.20)),
             'lift_at_10_percent': float(self._lift_at_percent(y_eval, y_proba, 0.10)),
             'lift_at_20_percent': float(self._lift_at_percent(y_eval, y_proba, 0.20)),
+            'brier_score': float(brier_score_loss(y_eval, y_proba)),
+            'expected_calibration_error': float(self._expected_calibration_error(y_eval, y_proba)),
             'n_train': len(X_train),
             'n_test': len(X_eval),
             'class_distribution': {str(k): int(v) for k, v in zip(*np.unique(np.concatenate([y_train, y_eval]), return_counts=True))},
@@ -686,6 +1048,11 @@ class AdaptiveLeadScorer:
             'target_diagnostics': target_diagnostics or {},
             'validation_context': validation_context or {},
             'probability_calibration': 'sigmoid' if self.calibrated_model is not None else 'none',
+            'recommended_threshold': self.decision_threshold,
+            'threshold_tuning': threshold_metrics,
+            'imbalance_strategy': resampling_diagnostics,
+            'model_family': self.model_family,
+            'candidate_models': self.training_diagnostics['candidate_models'],
             'explanation_method': explanation_method,
         }
 
@@ -888,6 +1255,9 @@ class AdaptiveLeadScorer:
             'feature_baselines': self.feature_baselines,
             'ranking_version': self.ranking_version,
             'rationale_version': self.rationale_version,
+            'model_family': self.model_family,
+            'decision_threshold': self.decision_threshold,
+            'training_diagnostics': self.training_diagnostics,
         }, path)
 
     def load(self, path: str):
@@ -902,6 +1272,9 @@ class AdaptiveLeadScorer:
         self.feature_baselines = bundle.get('feature_baselines', {})
         self.ranking_version = bundle.get('ranking_version', self.ranking_version)
         self.rationale_version = bundle.get('rationale_version', self.rationale_version)
+        self.model_family = bundle.get('model_family')
+        self.decision_threshold = bundle.get('decision_threshold', 0.5)
+        self.training_diagnostics = bundle.get('training_diagnostics', {})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -928,7 +1301,7 @@ class UniversalAdaptiveScorer:
         temporal_candidates = [col for col, type_ in column_types.items() if type_ == 'temporal' and col != target_col]
         for temporal_col in temporal_candidates:
             try:
-                parsed = pd.to_datetime(df[temporal_col], errors='coerce')
+                parsed = _safe_to_datetime(df[temporal_col])
                 valid = parsed.notna().sum()
                 if valid < max(10, int(len(df) * 0.5)):
                     continue
@@ -939,8 +1312,8 @@ class UniversalAdaptiveScorer:
                 if (
                     len(train_df) >= 10
                     and len(eval_df) >= 2
-                    and train_df[target_col].nunique() == 2
-                    and eval_df[target_col].nunique() == 2
+                    and _is_binary_series(train_df[target_col])
+                    and _is_binary_series(eval_df[target_col])
                 ):
                     return train_df, eval_df, {
                         "strategy": "time_split",
@@ -949,11 +1322,19 @@ class UniversalAdaptiveScorer:
             except Exception:
                 pass
 
+        stratify_labels = df[target_col].map(_normalize_binary_token)
+        non_null_labels = stratify_labels.dropna()
+        if non_null_labels.empty or non_null_labels.nunique() < 2:
+            raise ValueError(
+                f"Target column '{target_col}' does not have enough normalized binary signal for stratified split."
+            )
+        fill_token = str(non_null_labels.mode().iloc[0])
+
         train_df, eval_df = train_test_split(
             df,
             test_size=0.2,
             random_state=42,
-            stratify=df[target_col],
+            stratify=stratify_labels.fillna(fill_token),
         )
         return train_df.copy(), eval_df.copy(), {
             "strategy": "random_split",
@@ -974,9 +1355,14 @@ class UniversalAdaptiveScorer:
         """
         # Step 1: Analyze raw schema and determine target
         bootstrap_analyzer = DataAnalyzer(df, target_col=target_col)
-        bootstrap_column_types = bootstrap_analyzer.infer_column_types()
+        bootstrap_analyzer.infer_column_types()
         target = bootstrap_analyzer.auto_detect_target()
-        train_df, eval_df, validation_context = self._split_raw_df(df, target, bootstrap_column_types)
+        bootstrap_df = bootstrap_analyzer.df.copy()
+        train_df, eval_df, validation_context = self._split_raw_df(
+            bootstrap_df,
+            target,
+            bootstrap_analyzer.column_types,
+        )
 
         # Step 2: Fit analyzer only on training data to avoid leakage
         self.analyzer = DataAnalyzer(train_df, target_col=target)
@@ -1344,17 +1730,8 @@ class ActionRecommender:
     """
     Maps (profile_score, engagement_score) to recommended action.
     
-    The 2x2 Matrix:
-    
-                        LOW Engagement (<50)    HIGH Engagement (≥50)
-                        ─────────────────────────────────────────────────
-    HIGH Profile (≥50)  │ 🟡 NURTURE           │ 🟢 CLOSE NOW
-                        │ "Perfect fit,        │ "Hot lead!"
-                        │  reach out now"      │
-                        ─────────────────────────────────────────────────
-    LOW Profile (<50)   │ 🔴 DEPRIORITIZE      │ 🟠 AUTO-SEQUENCE
-                        │ "Low priority"       │ "Interested but
-                        │                      │  not ideal fit"
+    Action matrix with profile-score stratification.
+    Low-profile leads are still split into actionable buckets.
     """
     
     ACTIONS = {
@@ -1386,9 +1763,33 @@ class ActionRecommender:
             'action': 'DEPRIORITIZE',
             'emoji': '🔴',
             'color': 'red',
-            'priority': 4,
+            'priority': 6,
             'description': 'Low priority - focus elsewhere.',
             'next_steps': ['Add to long-term nurture', 'Revisit in 6 months', 'Remove from active pipeline'],
+        },
+        'monitor': {
+            'action': 'MONITOR',
+            'emoji': '🟣',
+            'color': 'purple',
+            'priority': 5,
+            'description': 'Not ready now, but keep under watch for signal changes.',
+            'next_steps': ['Track weekly activity', 'Trigger alert on engagement spike', 'Re-score after new interactions'],
+        },
+        'light_nurture': {
+            'action': 'LIGHT NURTURE',
+            'emoji': '🔵',
+            'color': 'blue',
+            'priority': 4,
+            'description': 'Moderate potential - keep warm with lightweight automation.',
+            'next_steps': ['Add to low-frequency sequence', 'Share one relevant use case', 'Re-evaluate after 14 days'],
+        },
+        'priority_review': {
+            'action': 'PRIORITY REVIEW',
+            'emoji': '🟠',
+            'color': 'orange',
+            'priority': 3,
+            'description': 'Near-threshold profile - review quickly for contextual fit.',
+            'next_steps': ['Check account context', 'Validate fit criteria', 'Escalate if intent strengthens'],
         },
     }
     
@@ -1407,12 +1808,18 @@ class ActionRecommender:
         Returns:
             Action recommendation with metadata
         """
-        # If no engagement data, base recommendation only on profile
+        # If no engagement data, still stratify by profile score bands.
         if engagement_score is None:
-            if profile_score >= self.profile_threshold:
-                action_key = 'nurture'  # Good fit, unknown engagement
+            if profile_score >= 75:
+                action_key = 'nurture'
+            elif profile_score >= self.profile_threshold:
+                action_key = 'priority_review'
+            elif profile_score >= 40:
+                action_key = 'light_nurture'
+            elif profile_score >= 20:
+                action_key = 'monitor'
             else:
-                action_key = 'deprioritize'  # Poor fit, unknown engagement
+                action_key = 'deprioritize'
             
             result = self.ACTIONS[action_key].copy()
             result['profile_score'] = profile_score
@@ -1421,7 +1828,7 @@ class ActionRecommender:
             result['confidence'] = 'low'  # Can't be confident without engagement
             return result
         
-        # 2x2 Matrix Logic
+        # Engagement-aware routing with profile-score banding.
         high_profile = profile_score >= self.profile_threshold
         high_engagement = engagement_score >= self.engagement_threshold
         
@@ -1429,13 +1836,23 @@ class ActionRecommender:
             action_key = 'close_now'
             quadrant = 'high_profile_high_engagement'
         elif high_profile and not high_engagement:
-            action_key = 'nurture'
+            action_key = 'nurture' if profile_score >= 75 else 'priority_review'
             quadrant = 'high_profile_low_engagement'
         elif not high_profile and high_engagement:
-            action_key = 'auto_sequence'
+            if profile_score >= 40:
+                action_key = 'auto_sequence'
+            elif profile_score >= 20:
+                action_key = 'light_nurture'
+            else:
+                action_key = 'monitor'
             quadrant = 'low_profile_high_engagement'
         else:
-            action_key = 'deprioritize'
+            if profile_score >= 40:
+                action_key = 'light_nurture'
+            elif profile_score >= 20:
+                action_key = 'monitor'
+            else:
+                action_key = 'deprioritize'
             quadrant = 'low_profile_low_engagement'
         
         # Calculate confidence based on how far from thresholds

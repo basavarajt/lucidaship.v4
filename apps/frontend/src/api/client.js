@@ -39,6 +39,7 @@ export const scoringApi = {
     return response.data;
   },
 
+  // ━━ SYNC TRAINING (legacy, still works) ━━
   train: async (modelName, files, targetCol = null, mode = "supervised") => {
     const formData = new FormData();
     files.forEach((f) => formData.append('files', f));
@@ -52,11 +53,64 @@ export const scoringApi = {
     return response.data;
   },
 
-  score: async (modelName, files) => {
+  // ━━ ASYNC TRAINING (NEW - Production Ready) ━━
+  /**
+   * Start background training job. Returns immediately with job_id.
+   * @param {string} modelName - Model name
+   * @param {File[]} files - CSV files to train on
+   * @param {string} targetCol - Binary target column name (optional for auto-detect)
+   * @param {string} mode - 'supervised' (default) or 'unsupervised'
+   * @returns {Promise} {job_id, status, message, poll_url, result_url}
+   */
+  trainAsync: async (modelName, files, targetCol = null, mode = "supervised") => {
     const formData = new FormData();
     files.forEach((f) => formData.append('files', f));
 
-    const url = `/score-csv?model_name=${encodeURIComponent(modelName)}`;
+    let url = `/train/async?model_name=${encodeURIComponent(modelName)}&mode=${encodeURIComponent(mode)}`;
+    if (targetCol) url += `&target_column=${encodeURIComponent(targetCol)}`;
+
+    const response = await client.post(url, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
+
+  /**
+   * Poll for training job status. Call this every 3-5 seconds.
+   * @param {string} jobId - Job ID from trainAsync
+   * @returns {Promise} Job status, progress (0-100), current_step, etc.
+   */
+  getTrainingStatus: async (jobId) => {
+    const response = await client.get(`/train/status/${encodeURIComponent(jobId)}`);
+    return response.data;
+  },
+
+  /**
+   * Get final training results (call when status = 'completed').
+   * @param {string} jobId - Job ID from trainAsync
+   * @returns {Promise} Final metrics, model info, results
+   */
+  getTrainingResult: async (jobId) => {
+    const response = await client.get(`/train/${encodeURIComponent(jobId)}/result`);
+    return response.data;
+  },
+
+  /**
+   * List all training jobs for current user.
+   * @param {number} limit - Max jobs to return (default 50)
+   * @returns {Promise} List of jobs
+   */
+  listTrainingJobs: async (limit = 50) => {
+    const response = await client.get(`/train/jobs?limit=${limit}`);
+    return response.data;
+  },
+
+  score: async (modelName, files, autoSelectModel = false) => {
+    const formData = new FormData();
+    files.forEach((f) => formData.append('files', f));
+
+    const url =
+      `/score-csv?model_name=${encodeURIComponent(modelName)}&auto_select_model=${encodeURIComponent(autoSelectModel)}`;
     const response = await client.post(url, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });

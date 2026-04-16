@@ -22,6 +22,14 @@ def test_training_and_scoring_emit_diagnostics_and_rationale():
     assert training_result["analysis"]["feature_blueprint"]["n_engineered_features"] > 0
     assert "precision" in training_result["metrics"]
     assert "recall" in training_result["metrics"]
+    assert "lift_at_20_percent" in training_result["metrics"]
+    assert "expected_calibration_error" in training_result["metrics"]
+    assert "recommended_threshold" in training_result["metrics"]
+    assert training_result["metrics"]["model_family"] in {"xgboost", "gradient_boosting", "random_forest"}
+    assert 0.0 <= training_result["metrics"]["recommended_threshold"] <= 1.0
+    assert isinstance(training_result["metrics"]["candidate_models"], list)
+    assert len(training_result["metrics"]["candidate_models"]) >= 1
+    assert "imbalance_strategy" in training_result["metrics"]
 
     df_score = pd.DataFrame(
         {
@@ -40,3 +48,39 @@ def test_training_and_scoring_emit_diagnostics_and_rationale():
     assert "rationale_summary" in results[0]
     assert "score_band" in results[0]
     assert "ranking_version" in results[0]
+
+
+def test_auto_target_detect_handles_binary_values_with_nulls_whitespace_and_mixed_types():
+    df_train = pd.DataFrame(
+        {
+            "lead_id": [f"id-{i}" for i in range(20)],
+            "interactions": [1, 2, 3, 4, 5] * 4,
+            "segment": ["A", "B", "C", "A", "B"] * 4,
+            "outcome": [
+                "1", 1, " 1 ", "0", 0, " 0 ", None, "null", "N/A", "",
+                "1", 1, "0", 0, "1", "0", " 1", " 0", "1", "0",
+            ],
+        }
+    )
+
+    scorer = UniversalAdaptiveScorer()
+    training_result = scorer.train(df_train, client_id="binary-normalization-test")
+
+    assert training_result["analysis"]["target_column"] in {"outcome", "segment"}
+
+
+def test_train_falls_back_to_synthetic_target_when_no_binary_column_exists():
+    df_train = pd.DataFrame(
+        {
+            "lead_id": [f"id-{i}" for i in range(40)],
+            "revenue": [float(i * 10 + (i % 3)) for i in range(40)],
+            "sessions": [float((i % 9) + 1) for i in range(40)],
+            "segment": [f"seg-{i % 4}" for i in range(40)],
+        }
+    )
+
+    scorer = UniversalAdaptiveScorer()
+    training_result = scorer.train(df_train, client_id="synthetic-fallback-test")
+
+    assert training_result["analysis"]["target_column"] == "__synthetic_target__"
+    assert training_result["analysis"]["target_diagnostics"]["recommendation"] == "synthetic_target_created"

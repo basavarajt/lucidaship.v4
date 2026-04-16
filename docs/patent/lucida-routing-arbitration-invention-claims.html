@@ -79,32 +79,34 @@
 </head>
 <body>
   <div class="page">
-    <h1>Lucida Adaptive Routing and Arbitration System</h1>
-    <div class="subtitle">Draft invention-claims memorandum focused on usability-supportive, patent-oriented system behavior</div>
-    <div class="meta">Prepared from the current Lucida implementation as of April 3, 2026. This document is a product and invention drafting aid, not legal advice.</div>
+    <h1>Lucida Adaptive Routing, Merge Governance, and Quantization System</h1>
+    <div class="subtitle">Updated invention-claims memorandum grounded in implemented backend behavior</div>
+    <div class="meta">Prepared from the current Lucida implementation as of April 13, 2026. This document is a product and invention drafting aid, not legal advice.</div>
 
     <h2>1. Technical Field</h2>
-    <p>This invention relates to machine-learning driven ranking systems, and more specifically to adaptive score routing, segment-specialized model arbitration, explainable cohort-aware model selection, and feedback-triggered retraining in ranking workflows.</p>
+    <p>This invention relates to machine-learning ranking systems and data-ingestion systems, and more specifically to adaptive score routing, segment-specialized model arbitration, explainable cohort-aware model selection, conservative relationship-aware dataset merge planning, and guarded upload-time numeric quantization in ranking workflows.</p>
 
     <h2>2. Technical Problem</h2>
-    <p>Conventional lead scoring systems typically apply a single model to all incoming records, even when real-world outcomes differ materially across segments. Some systems allow separate models to exist, but they do not provide a deterministic, inspectable routing policy that decides which specialized model should handle a given row, nor do they expose an arbitration ledger explaining why one candidate model was chosen over another. As a result, these systems are hard to trust, hard to govern, and weakly differentiated.</p>
+    <p>Conventional lead scoring systems typically apply a single model to all incoming records, even when real-world outcomes differ materially across segments. Conventional data preparation pipelines also perform brittle joins or uncontrolled compression that can silently corrupt model inputs. Existing systems usually do not provide deterministic, inspectable routing policies, explainable arbitration ledgers, conservative join-shape enforcement, or distortion-guardrailed compression fallback modes. As a result, such systems are hard to trust, hard to govern, and weakly differentiated.</p>
 
     <h2>3. Invention Summary</h2>
-    <p>Lucida introduces a routed adaptive ranking architecture in which a base ranking model may coexist with multiple segment-specialized models derived from real-world feedback. At score time, the system evaluates whether an incoming row matches one or more specialized cohorts, computes a deterministic routing priority, selects the winning model according to a defined arbitration policy, scores the row through the selected model, and emits a routing ledger describing the policy, candidates considered, reason for selection, and selected model.</p>
-    <p>The invention also includes feedback-derived segment hotspot detection, segment-specific retraining, automatic retrain triggering under policy thresholds, and version-aware ranking comparison. These elements together create a governed adaptive ranking system rather than a static prediction endpoint.</p>
+    <p>Lucida introduces a routed adaptive ranking architecture in which a base ranking model may coexist with multiple segment-specialized models derived from real-world feedback. At score time, the system evaluates whether an incoming row matches one or more specialized cohorts, computes a deterministic routing priority, selects the winning model according to a defined arbitration policy, scores the row through the selected model, and emits a routing ledger describing policy, candidates considered, reason for selection, and selected model.</p>
+    <p>The invention further includes: (i) conservative relationship-aware merge planning that identifies candidate join keys and enforces join-shape safety, including refusal of many-to-many joins; (ii) upload-time numeric quantization with distortion guardrails, shadow mode, and safe-default execution mode; (iii) feedback matching through deterministic row signatures; and (iv) version-aware ranking comparison using prior artifact versions.</p>
 
     <h2>4. Core Inventive Concepts</h2>
     <ol>
       <li>Adaptive generation of segment-specialized models from feedback events tied to prior scored rows.</li>
-      <li>Score-time routing of an incoming row between a base model and one or more specialized models based on cohort matching.</li>
-      <li>Deterministic arbitration among multiple matching specialized models using a routing priority composed of model-specific operational signals such as feedback row count and performance metrics.</li>
+      <li>Score-time routing between a base model and one or more specialized models based on cohort matching.</li>
+      <li>Deterministic arbitration among multiple matching specialized models using weighted operational signals including feedback volume and performance metrics.</li>
       <li>Emission of an inspectable routing ledger containing policy identifier, route reason, selected model, matched cohort, and candidate arbitration details.</li>
-      <li>Usability-oriented surfacing of routing rationale so users can understand how the ranking decision was produced.</li>
+      <li>Deterministic feedback matching via row signatures linking score-time rows and later outcome uploads.</li>
+      <li>Conservative relationship-aware merge planning and execution with join safety controls and one-to-many aggregation handling.</li>
+      <li>Upload-time numeric quantization with measured distortion thresholds and execution-mode fallback behavior.</li>
     </ol>
 
-    <h2>5. Independent Claim Drafts</h2>
+    <h2>5. Independent Claim Drafts (Updated)</h2>
 
-    <h3>Claim Set A: Method</h3>
+    <h3>Claim Set A: Routing and Arbitration Method</h3>
     <p class="claim"><span class="claim-number">1.</span> A computer-implemented method for adaptive ranking of records, comprising: storing a base ranking model; storing a plurality of segment-specialized ranking models each associated with a respective segment definition; receiving an input record for scoring; determining whether the input record matches one or more of the segment definitions; when the input record matches multiple segment definitions, computing a priority value for each corresponding segment-specialized ranking model according to an arbitration policy; selecting, based on the priority values, one of the segment-specialized ranking models or the base ranking model; generating a ranking score for the input record using the selected model; and outputting, together with the ranking score, routing metadata identifying the selected model and a reason for its selection.</p>
 
     <p class="claim"><span class="claim-number">2.</span> The method of claim 1, wherein the priority value is based on at least one of: feedback volume associated with the segment-specialized ranking model, an accuracy metric associated with the segment-specialized ranking model, and an area-under-curve metric associated with the segment-specialized ranking model.</p>
@@ -112,20 +114,40 @@
     <p class="claim"><span class="claim-number">3.</span> The method of claim 1, wherein the routing metadata further comprises a policy identifier and a list of candidate segment-specialized ranking models considered during arbitration.</p>
 
     <p class="claim"><span class="claim-number">4.</span> The method of claim 1, further comprising generating the segment-specialized ranking models by retraining on feedback events associated with previously scored records belonging to corresponding segments.</p>
+    <p class="claim"><span class="claim-number">5.</span> The method of claim 1, wherein the routing metadata is persisted with each scored record and includes candidate priority scores computed by a deterministic weighted function.</p>
 
-    <h3>Claim Set B: System</h3>
-    <p class="claim"><span class="claim-number">5.</span> A ranking system comprising: one or more processors; memory storing instructions; a feedback event store linking historical score outputs to subsequent outcomes; a model store containing a base model and one or more segment-specialized models; and a routing engine configured to match an incoming row against segment criteria, arbitrate between eligible models, select a winning model, produce a score, and produce a route explanation ledger.</p>
+    <h3>Claim Set B: Ranking System</h3>
+    <p class="claim"><span class="claim-number">6.</span> A ranking system comprising: one or more processors; memory storing instructions; a feedback event store linking historical score outputs to subsequent outcomes; a model store containing a base model and one or more segment-specialized models; and a routing engine configured to match an incoming row against segment criteria, arbitrate between eligible models, select a winning model, produce a score, and produce a route explanation ledger.</p>
 
-    <p class="claim"><span class="claim-number">6.</span> The system of claim 5, wherein the route explanation ledger includes at least: a selected model identifier, a route type, a matched segment value, a policy identifier, a route reason, and one or more alternative candidate models not selected.</p>
+    <p class="claim"><span class="claim-number">7.</span> The system of claim 6, wherein the route explanation ledger includes at least: a selected model identifier, a route type, a matched segment value, a policy identifier, a route reason, and one or more alternative candidate models not selected.</p>
 
-    <p class="claim"><span class="claim-number">7.</span> The system of claim 5, wherein the routing engine falls back to the base model when no specialized segment model matches the incoming row.</p>
+    <p class="claim"><span class="claim-number">8.</span> The system of claim 6, wherein the routing engine falls back to the base model when no specialized segment model matches the incoming row.</p>
 
     <h3>Claim Set C: Feedback-Driven Governance</h3>
-    <p class="claim"><span class="claim-number">8.</span> A computer-implemented method comprising: storing scored row snapshots with deterministic row signatures; later receiving outcome data; matching the outcome data back to the scored row snapshots using the row signatures; calculating feedback performance metrics; identifying one or more drifting segments based on disparity between predicted score and actual outcome rate; and retraining a segment-specialized model using feedback rows belonging to a selected drifting segment.</p>
+    <p class="claim"><span class="claim-number">9.</span> A computer-implemented method comprising: storing scored row snapshots with deterministic row signatures; later receiving outcome data; matching the outcome data back to the scored row snapshots using the row signatures; calculating feedback performance metrics; identifying one or more drifting segments based on disparity between predicted score and actual outcome rate; and retraining a segment-specialized model using feedback rows belonging to a selected drifting segment.</p>
 
-    <p class="claim"><span class="claim-number">9.</span> The method of claim 8, further comprising automatically triggering retraining when a policy threshold is satisfied by at least feedback volume and one or more post-score performance indicators.</p>
+    <p class="claim"><span class="claim-number">10.</span> The method of claim 9, further comprising automatically triggering retraining when a policy threshold is satisfied by at least feedback volume and one or more post-score performance indicators.</p>
 
-    <p class="claim"><span class="claim-number">10.</span> The method of claim 8, wherein the retrained segment-specialized model is subsequently used by the routing engine of claim 5 for future rows matching the selected drifting segment.</p>
+    <p class="claim"><span class="claim-number">11.</span> The method of claim 9, wherein the retrained segment-specialized model is subsequently used by the routing engine of claim 6 for future rows matching the selected drifting segment.</p>
+
+    <h3>Claim Set D: Relationship-Aware Merge Planning</h3>
+    <p class="claim"><span class="claim-number">12.</span> A computer-implemented method for preparing machine-learning input datasets, comprising: profiling columns across a plurality of uploaded datasets; generating pairwise candidate join keys based on at least name similarity, normalized name similarity, value overlap, normalized value overlap, statistical similarity, and coverage; assigning confidence scores to candidate join keys; selecting a join plan according to confidence and coverage thresholds; determining join-shape cardinality for selected joins; and executing only join operations that satisfy predefined safety constraints.</p>
+
+    <p class="claim"><span class="claim-number">13.</span> The method of claim 12, further comprising refusing a proposed merge when the join-shape cardinality is many-to-many or when no candidate join satisfies minimum confidence and minimum coverage thresholds.</p>
+
+    <p class="claim"><span class="claim-number">14.</span> The method of claim 12, wherein one-to-many joins are transformed by aggregation before merge execution to preserve base-row semantics for scoring.</p>
+
+    <h3>Claim Set E: Guardrailed Upload Quantization</h3>
+    <p class="claim"><span class="claim-number">15.</span> A computer-implemented method for preparing uploaded tabular data for ranking, comprising: identifying protected columns to remain lossless; identifying eligible numeric columns for quantization; applying randomized sign and permutation transforms to eligible numeric columns; quantizing transformed values to fixed-bit representations; reconstructing dequantized values; computing distortion metrics including reconstruction mean-squared error and inner-product error; and selecting an execution mode according to distortion thresholds.</p>
+
+    <p class="claim"><span class="claim-number">16.</span> The method of claim 15, wherein the execution mode is one of: full-precision bypass mode, shadow mode with quantization diagnostics while preserving full-precision scoring, and compressed execution mode when distortion metrics satisfy policy thresholds.</p>
+
+    <p class="claim"><span class="claim-number">17.</span> The method of claim 15, wherein the protected columns include at least one of: identifier-like columns, datetime-like columns, binary columns, target columns, and non-numeric columns.</p>
+
+    <h3>Claim Set F: Version-Aware Ranking Comparison</h3>
+    <p class="claim"><span class="claim-number">18.</span> A computer-implemented method comprising: storing versioned model artifacts for a model identifier; scoring a batch of rows with a current version; loading a prior artifact version; re-scoring the batch with the prior artifact version; and emitting per-row rank movement metadata including current rank, previous rank, rank delta, score delta, and comparison baseline timestamp.</p>
+
+    <p class="claim"><span class="claim-number">19.</span> The method of claim 18, wherein per-row alignment between current and prior scores is determined using deterministic row signatures derived from normalized row payloads.</p>
 
     <h2>6. Strong Dependent Claim Directions</h2>
     <ul>
@@ -135,19 +157,25 @@
       <li>Arbitration details limited to top candidate models ranked by deterministic priority.</li>
       <li>Automatic creation of a segment model name derived from a base model name and a segment key/value pair.</li>
       <li>Use of versioned artifacts so routed decisions can later be compared against prior model generations.</li>
+      <li>Join confidence thresholds implemented as configurable policy controls for safe auto-merge.</li>
+      <li>Many-to-many merge refusal with explicit warning telemetry in merge-plan output.</li>
+      <li>Quantization protection rules that preserve identifier, temporal, and target semantics.</li>
+      <li>Distortion-threshold guardrails with fallback to full-precision execution when safety criteria fail.</li>
     </ul>
 
     <h2>7. Novelty and Differentiation Positioning</h2>
-    <p>The strongest patentable center here is not “using ML to score leads.” That is generic. The more specific inventive center is:</p>
+    <p>The strongest patentable center here is not "using ML to score leads." That is generic. The stronger inventive center is:</p>
     <ol>
       <li>A closed-loop system that converts outcome feedback into segment-specialized model variants.</li>
       <li>A score-time arbitration engine that decides which variant should handle a row.</li>
       <li>An inspectable routing ledger that makes the arbitration itself part of the output.</li>
+      <li>A conservative relationship-aware merge planner that controls join safety before model execution.</li>
+      <li>A guardrailed quantization path that trades memory and latency against bounded distortion under explicit policy.</li>
     </ol>
-    <p>This is stronger because it ties together adaptation, selection, and explainability as one governed technical mechanism. That is much more concrete than a typical AutoML or ensemble scoring claim.</p>
+    <p>This is stronger because it ties adaptation, selection, explainability, data-shape governance, and compression safety into one governed technical mechanism. That is more concrete than generic AutoML or ensemble scoring claims.</p>
 
     <h2>8. Commercially Useful Claim Framing</h2>
-    <p>For usability, the user does not need to know which segment model exists in advance. The system automatically detects the route, applies the model, and explains it. For patent framing, that means the invention can be positioned as a user-facing improvement in trustworthy adaptive scoring, not merely an internal analytics pipeline.</p>
+    <p>For usability, users do not need to know which segment model exists in advance, which join key should be used, or whether compression is safe for a given upload. The system determines route, merge strategy, and compression execution mode while emitting inspectable diagnostics. For patent framing, this supports a user-facing improvement in trustworthy adaptive scoring and safe data preparation, not merely an internal analytics pipeline.</p>
 
     <h2>9. Recommended Filing Narrative</h2>
     <ol>
@@ -156,6 +184,8 @@
       <li>Describe row-level score-time route matching.</li>
       <li>Describe multi-candidate arbitration with a deterministic priority rule.</li>
       <li>Describe the output of a routing ledger for transparency, governance, and downstream trust.</li>
+      <li>Describe confidence-scored relationship discovery and join-shape constrained merge execution.</li>
+      <li>Describe distortion-guardrailed numeric quantization and explicit fallback execution modes.</li>
     </ol>
 
     <h2>10. Suggested Title Variants</h2>
@@ -163,10 +193,20 @@
       <li>Adaptive Ranking System with Segment-Specific Model Arbitration and Route Explanation</li>
       <li>Feedback-Driven Cohort Routing for Machine-Learned Record Ranking</li>
       <li>Deterministic Arbitration of Specialized Ranking Models in an Adaptive Scoring Platform</li>
+      <li>Relationship-Aware Merge Governance for Multi-Table Predictive Ranking Pipelines</li>
+      <li>Distortion-Guardrailed Quantization for Safe Upload-Time Model Inference Workflows</li>
     </ul>
 
+    <h2>11. Filing Priority Guidance</h2>
+    <ol>
+      <li><strong>Priority 1:</strong> Routing arbitration plus feedback-driven segment model lifecycle (Claims 1-11).</li>
+      <li><strong>Priority 2:</strong> Relationship-aware merge governance with join-shape controls (Claims 12-14).</li>
+      <li><strong>Priority 3:</strong> Guardrailed upload quantization with policy-based execution mode selection (Claims 15-17).</li>
+      <li><strong>Priority 4:</strong> Version-aware ranking comparison and rank-movement telemetry (Claims 18-19).</li>
+    </ol>
+
     <div class="note">
-      <strong>Practical Note:</strong> For patent counsel, bring this document together with code excerpts for the routing policy, segment model generation, candidate priority computation, and route explanation output. Those implementation details help convert broad invention language into a defensible specification.
+      <strong>Practical Note:</strong> For patent counsel, package this memorandum with implementation excerpts for routing policy, segment model generation, row-signature feedback matching, relationship-aware merge controls, quantization guardrails, and version-comparison telemetry. These details make specification drafting and claim support materially stronger.
     </div>
 
     <p class="small">End of memorandum.</p>

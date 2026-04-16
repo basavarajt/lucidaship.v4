@@ -11,6 +11,14 @@ import pandas as pd
 import numpy as np
 from typing import Tuple, Dict, List, Optional
 
+NULL_LIKE_TOKENS = {"", "nan", "none", "null", "n/a", "na"}
+POSITIVE_OUTCOME_TOKENS = {
+    "1", "yes", "true", "won", "converted", "success", "positive", "closed_won"
+}
+NEGATIVE_OUTCOME_TOKENS = {
+    "0", "no", "false", "lost", "not converted", "failure", "negative", "closed_lost"
+}
+
 
 class TargetDiscoveryEngine:
     """
@@ -49,6 +57,28 @@ class TargetDiscoveryEngine:
 
         candidates = []
 
+        def fix_binary_col(series: pd.Series) -> pd.Series:
+            """Normalize mixed target values before unique counting."""
+            cleaned = series.copy()
+            cleaned = cleaned.map(lambda v: None if pd.isna(v) else str(v).strip().lower())
+            cleaned = cleaned.replace(list(NULL_LIKE_TOKENS), None)
+            cleaned = cleaned.dropna()
+
+            # Canonicalize numeric-like strings ("1", "1.0") -> "1"
+            def canon(v: str) -> str:
+                try:
+                    num = float(v)
+                    if np.isfinite(num):
+                        rounded = round(num)
+                        if abs(num - rounded) < 1e-9:
+                            return str(int(rounded))
+                        return f"{num:g}"
+                except Exception:
+                    pass
+                return v
+
+            return cleaned.map(canon)
+
         for col in self.df.columns:
             # Skip columns with >50% null values (unreliable targets)
             null_ratio = self.df[col].isna().sum() / len(self.df)
@@ -62,28 +92,19 @@ class TargetDiscoveryEngine:
             if score == 0:
                 continue
 
-            # Check cardinality
-            unique_count = self.df[col].nunique()
+            # Check cardinality on cleaned values (null/whitespace/type normalized)
+            cleaned = fix_binary_col(self.df[col])
+            if cleaned.empty:
+                continue
+            unique_count = cleaned.nunique()
             if unique_count != 2:
                 continue
 
             # Check if values look like outcomes
-            unique_vals = set(self.df[col].dropna().astype(str).str.lower().unique())
-
-            outcome_patterns = {
-                'won_lost': ['won', 'lost'],
-                'yes_no': ['yes', 'no'],
-                'true_false': ['true', 'false'],
-                'converted_not': ['converted', 'not converted'],
-                'binary': ['0', '1'],
-                'positive_negative': ['positive', 'negative'],
-                'success_failure': ['success', 'failure'],
-            }
-
-            matches_pattern = any(
-                all(v in unique_vals for v in pattern)
-                for pattern in outcome_patterns.values()
-            )
+            unique_vals = set(cleaned.unique())
+            has_positive = any(v in POSITIVE_OUTCOME_TOKENS for v in unique_vals)
+            has_negative = any(v in NEGATIVE_OUTCOME_TOKENS for v in unique_vals)
+            matches_pattern = has_positive and has_negative
 
             if matches_pattern:
                 candidates.append((score, col))

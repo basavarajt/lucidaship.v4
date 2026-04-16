@@ -3,6 +3,7 @@ Application configuration – loaded from environment variables / .env file.
 Uses pydantic-settings for validation and type coercion.
 """
 
+import os
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 from typing import List
@@ -19,6 +20,11 @@ class Settings(BaseSettings):
     # ── Database (Turso / libSQL) ────────────────────────────
     TURSO_DATABASE_URL: str = ""
     TURSO_AUTH_TOKEN: str = ""
+    SQLITE_DB_PATH: str = os.path.join(
+        os.getenv("LOCALAPPDATA") or os.path.expanduser("~"),
+        "Lucida",
+        "lucida_local.db",
+    )
 
     # ── Authentication (Clerk) ──────────────────────────────
     CLERK_SECRET_KEY: str = ""
@@ -30,6 +36,12 @@ class Settings(BaseSettings):
     # ── ML ───────────────────────────────────────────────────
     MODEL_ARTIFACTS_DIR: str = "./model_artifacts"
     MAX_CSV_SIZE_MB: int = 200
+    UPLOAD_COMPRESSION_ENABLED: bool = True
+    UPLOAD_COMPRESSION_MODE: str = "shadow"
+    UPLOAD_COMPRESSION_NUMERIC_ONLY: bool = True
+    UPLOAD_COMPRESSION_MIN_ROWS: int = 128
+    UPLOAD_COMPRESSION_MAX_ALLOWED_MSE: float = 0.05
+    UPLOAD_COMPRESSION_MAX_ALLOWED_IP_ERROR: float = 0.10
 
     @property
     def cors_origins_list(self) -> List[str]:
