@@ -1,0 +1,100 @@
+Lucida Patent Alignment Report
+Date: 2026-04-17
+Scope: Code changes made today vs. docs/patent/lucida-enhanced-patent-claims.html
+Note: This is a technical mapping only, not legal advice. Patentability and claim scope must be reviewed by counsel.
+
+1) Total Changes Made Today (Codebase Summary)
+- Modified files:
+  - apps/backend/adaptive_scorer.py
+  - apps/backend/app/api/scoring.py
+- New files (services/helpers):
+  - apps/backend/app/services/column_matcher.py
+  - apps/backend/app/services/type_coercion.py
+  - apps/backend/app/services/intelligent_imputation.py
+- New files (ranking engine + benchmarks):
+  - apps/backend/app/services/ranking_engine.py
+  - apps/backend/scripts/benchmark_ranking.py
+- New files (tests):
+  - apps/backend/tests/test_ranking_engine.py
+  - apps/backend/tests/test_e2e_ranking.py
+  - apps/backend/tests/test_schema_preprocessing.py
+- New files (docs):
+  - docs/ALGORITHM_GUIDE.md
+
+2) Change Themes (What Was Added)
+A) Schema Compatibility Preprocessing
+- Fuzzy column matching (normalize + fuzzy similarity + best-match selection)
+- Automatic column renaming to expected model inputs
+- Type coercion to expected semantic types (numeric/temporal/binary/text)
+- Missing-column imputation using training stats
+- Scoring response now includes preprocessing report
+
+B) Training-Time Imputation Statistics
+- DataAnalyzer now computes per-column defaults (median/mode/baselines)
+- Stored on model analyzer for later scoring-time imputation
+
+C) Unsupervised Ranking Engine (Phase 1)
+- Signal extraction (numeric/categorical/temporal/composite)
+- TOPSIS ranking + AHP weighting + bootstrap confidence intervals
+- Benchmarks + unit/E2E tests + algorithm guide
+
+3) Comparison to Current Patent Claims (HTML Summary)
+The HTML document summarizes these claim packages:
+- Score-Time Routing Arbitration (baseline)
+- Async Training with Job Queue
+- Merge Governance
+- Quantization Guardrails
+- Version Telemetry
+- Feedback Signature Matching
+- Target Auto-Detection
+- Performance Optimization
+
+Mapping of today’s changes to claim packages:
+- Score-Time Routing Arbitration: Not directly modified today.
+- Async Training with Job Queue: Not modified today.
+- Merge Governance: Not modified today.
+- Quantization Guardrails: Not modified today.
+- Version Telemetry: Not modified today.
+- Feedback Signature Matching: Not modified today.
+- Target Auto-Detection: Indirectly extended by schema preprocessing that reduces manual column mapping.
+- Performance Optimization: Indirectly extended by preprocessing that reduces scoring failures and rework.
+- New mechanisms not listed in the HTML summary:
+  - Schema Compatibility Preprocessing (fuzzy match + impute + coerce)
+  - Unsupervised Ranking Engine (TOPSIS + AHP + confidence intervals)
+
+4) Candidate Claim Ideas (Technical, Non-Legal)
+These are potential new claim themes based on the code changes. They are NOT legal conclusions:
+
+A) Schema Compatibility Preprocessing Pipeline
+- Automatically normalizes incoming column names, fuzzy-matches to expected schema,
+  renames fields, imputes missing columns using training stats, and coerces types
+  before model selection and scoring.
+- Generates a structured preprocessing report with coverage, extra columns, and
+  coercion success metrics for downstream auditing.
+
+B) Training-Time Imputation Stat Capture
+- Stores per-column defaults (median/mode/baselines) tied to learned schema
+  for deterministic imputation at scoring time without retraining.
+
+C) Unsupervised Ranking Engine (Phase 1)
+- Multi-signal extraction from arbitrary CSVs
+- TOPSIS scoring + AHP weighting + bootstrap-based confidence intervals
+- Produces ranked outputs with explanatory metadata per signal
+
+5) Evidence Pointers (Files Added/Modified)
+- Schema preprocessing: apps/backend/app/api/scoring.py
+- Fuzzy matching: apps/backend/app/services/column_matcher.py
+- Type coercion: apps/backend/app/services/type_coercion.py
+- Imputation helpers: apps/backend/app/services/intelligent_imputation.py
+- Training-time imputation stats: apps/backend/adaptive_scorer.py
+- Ranking engine: apps/backend/app/services/ranking_engine.py
+- Benchmarks/tests/docs: apps/backend/scripts/benchmark_ranking.py, apps/backend/tests/*, docs/ALGORITHM_GUIDE.md
+
+6) Gaps vs. Current Claim Summary (HTML)
+- The HTML summary does not explicitly mention schema normalization / fuzzy matching.
+- The HTML summary does not include the TOPSIS/AHP ranking engine as a claim set.
+
+7) Suggested Next Steps (Non-Legal)
+- Add these two mechanisms to the detailed claims document (lucida-enhanced-patent-claims.md)
+  with clear feature lists and code evidence.
+- Ask counsel whether these mechanisms can be added as dependent claims or a new claim package.

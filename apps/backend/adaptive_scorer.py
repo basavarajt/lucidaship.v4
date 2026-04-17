@@ -126,6 +126,7 @@ class DataAnalyzer:
         self.binary_encoders = {}  # maps col -> {val: 0/1}
         self.target_scores = {}
         self.target_diagnostics = {}
+        self.imputation_stats = {}
 
     def _encode_binary(self, col: str) -> pd.Series:
         """
@@ -473,6 +474,62 @@ class DataAnalyzer:
             'n_features': int(len(self.filter_relevant_columns())),
             'target_balance': {str(k): int(v) for k, v in self.df[self.target_col].value_counts().items()} if self.target_col else None
         }
+
+    def compute_imputation_stats(self) -> Dict[str, Dict[str, object]]:
+        """Compute default imputation values for each column type."""
+        if not self.column_types:
+            self.infer_column_types()
+
+        stats: Dict[str, Dict[str, object]] = {}
+        for col, col_type in self.column_types.items():
+            if col == self.target_col:
+                continue
+            if col_type in {'ignore', 'id'}:
+                continue
+
+            col_data = self.df[col] if col in self.df.columns else pd.Series(dtype=object)
+
+            if col_type == 'numeric':
+                median_value = float(col_data.median()) if col_data.notna().any() else 0.0
+                mean_value = float(col_data.mean()) if col_data.notna().any() else 0.0
+                stats[col] = {
+                    'type': 'numeric',
+                    'median': median_value,
+                    'mean': mean_value,
+                    'min': float(col_data.min()) if col_data.notna().any() else 0.0,
+                    'max': float(col_data.max()) if col_data.notna().any() else 0.0,
+                    'default': median_value,
+                }
+            elif col_type in {'categorical', 'text'}:
+                mode_value = col_data.dropna().mode().iloc[0] if not col_data.dropna().empty else 'Unknown'
+                stats[col] = {
+                    'type': col_type,
+                    'mode': str(mode_value),
+                    'default': str(mode_value),
+                }
+            elif col_type == 'binary':
+                mode_value = col_data.dropna().mode().iloc[0] if not col_data.dropna().empty else 0
+                mode_value = int(mode_value) if str(mode_value).isdigit() else 0
+                stats[col] = {
+                    'type': 'binary',
+                    'mode': mode_value,
+                    'default': mode_value,
+                }
+            elif col_type == 'temporal':
+                try:
+                    parsed = _safe_to_datetime(col_data)
+                    days_ago = (pd.Timestamp.today() - parsed).dt.days
+                    median_days = float(days_ago.dropna().median()) if days_ago.notna().any() else 30.0
+                except Exception:
+                    median_days = 30.0
+                stats[col] = {
+                    'type': 'temporal',
+                    'median_days': median_days,
+                    'default': None,
+                }
+
+        self.imputation_stats = stats
+        return stats
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1369,6 +1426,7 @@ class UniversalAdaptiveScorer:
         column_types = self.analyzer.infer_column_types()
         target = self.analyzer.auto_detect_target()
         importance = self.analyzer.compute_feature_importance()
+        self.analyzer.compute_imputation_stats()
         analysis = self.analyzer.summary()
 
         # Step 3: Engineer features from training only, then transform holdout

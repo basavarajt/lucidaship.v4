@@ -28,6 +28,9 @@ from app.services.dataset_relationships import (
 from app.services.explanation_translator import translate_scoring_results
 from app.services.upload_quantization import IngestedDatasetAsset, ingest_uploaded_dataset
 from app.services.job_queue import get_job_queue, JobStatus
+from app.services.column_matcher import find_best_matches
+from app.services.intelligent_imputation import extract_imputation_stats, impute_missing_columns
+from app.services.type_coercion import coerce_series_to_expected_type
 from adaptive_scorer import UniversalAdaptiveScorer, DataAnalyzer, EngagementScorer, ActionRecommender
 
 logger = logging.getLogger(__name__)
@@ -101,24 +104,84 @@ def _score_model_compatibility(model: UniversalAdaptiveScorer, input_columns: se
             "missing_sample": [],
         }
 
-    matched = expected & input_columns
-    missing = expected - input_columns
-    unexpected = input_columns - expected
+    match_result = find_best_matches(expected, input_columns)
+    matches = match_result["matches"]
+    matched_expected = {m["expected"] for m in matches}
+    matched_actual = {m["actual"] for m in matches}
+    missing = set(match_result["unmatched_expected"])
+    unexpected = set(match_result["unmatched_actual"])
 
-    coverage = len(matched) / len(expected) if expected else 0.0
-    precision = len(matched) / len(input_columns) if input_columns else 0.0
-    score = (0.7 * coverage) + (0.3 * precision)
+    coverage = len(matched_expected) / len(expected) if expected else 0.0
+    precision = len(matched_actual) / len(input_columns) if input_columns else 0.0
+    avg_score = float(np.mean([m["score"] for m in matches])) if matches else 0.0
+    score = (0.7 * coverage) + (0.3 * precision) + (0.1 * avg_score)
+    score = min(score, 1.0)
 
     return {
         "score": float(round(score, 4)),
         "expected_columns": int(len(expected)),
-        "matched_columns": int(len(matched)),
+        "matched_columns": int(len(matched_expected)),
         "coverage": float(round(coverage, 4)),
         "precision": float(round(precision, 4)),
-        "matched_sample": sorted(list(matched))[:8],
+        "fuzzy_bonus": float(round(avg_score, 4)),
+        "matched_sample": [
+            {"expected": m["expected"], "actual": m["actual"], "score": m["score"], "method": m["method"]}
+            for m in matches[:8]
+        ],
         "missing_sample": sorted(list(missing))[:8],
         "unexpected_sample": sorted(list(unexpected))[:8],
     }
+
+
+def _preprocess_scoring_dataframe(
+    model: UniversalAdaptiveScorer,
+    df: pd.DataFrame,
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """Fuzzy-match columns, impute missing, and coerce types for scoring."""
+    expected = _extract_model_input_columns(model)
+    match_result = find_best_matches(expected, set(df.columns))
+    rename_map = match_result["mapping_actual_to_expected"]
+
+    if rename_map:
+        df = df.rename(columns=rename_map)
+
+    analyzer = getattr(model, "analyzer", None)
+    column_types = getattr(analyzer, "column_types", {}) if analyzer else {}
+    imputation_stats = getattr(analyzer, "imputation_stats", None) if analyzer else None
+    if not imputation_stats and analyzer is not None:
+        imputation_stats = extract_imputation_stats(analyzer.df, column_types, analyzer.target_col)
+
+    df, imputation_report = impute_missing_columns(df, expected, imputation_stats or {})
+
+    coercion_reports: Dict[str, Any] = {}
+    coercion_ratios = []
+    for col in expected:
+        expected_type = column_types.get(col)
+        if not expected_type or col not in df.columns:
+            continue
+        coerced, report = coerce_series_to_expected_type(df[col], expected_type)
+        df[col] = coerced
+        coercion_reports[col] = report
+        if report["original_non_null"] > 0:
+            coercion_ratios.append(report["coercion_ratio"])
+
+    coercion_success = float(np.mean(coercion_ratios)) if coercion_ratios else 1.0
+
+    coverage = (len(expected) - len(imputation_report["missing_columns"])) / len(expected) if expected else 0.0
+    extra_columns = match_result["unmatched_actual"]
+    extra_ratio = len(extra_columns) / len(df.columns) if len(df.columns) else 0.0
+
+    report = {
+        "matches": match_result["matches"],
+        "missing_columns": imputation_report["missing_columns"],
+        "extra_columns": extra_columns,
+        "imputed_columns": imputation_report["imputed_columns"],
+        "coverage": float(round(coverage, 4)),
+        "extra_ratio": float(round(extra_ratio, 4)),
+        "coercion_success": float(round(coercion_success, 4)),
+    }
+
+    return df, report
 
 
 def _choose_model_for_dataframe(
@@ -128,7 +191,7 @@ def _choose_model_for_dataframe(
     *,
     auto_select_model: bool,
     ambiguity_margin: float = 0.05,
-    minimum_score: float = 0.35,
+    minimum_score: float = 0.5,
 ) -> Tuple[Optional[str], Optional[UniversalAdaptiveScorer], Dict[str, Any]]:
     """
     Resolve model selection for scoring.
@@ -1206,6 +1269,7 @@ async def score_csv(
                 status_code,
             )
 
+        df, preprocessing_report = _preprocess_scoring_dataframe(scorer, df)
         results = _route_and_score_rows(tenant_id, selected_model_name, scorer, df)
         rank_tracking = _compare_against_previous_version(tenant_id, selected_model_name, df, results)
 
@@ -1281,6 +1345,7 @@ async def score_csv(
             "merge_plan": merge_plan,
             "compression": compression,
             "model_selection": model_selection,
+            "preprocessing": preprocessing_report,
             "routing_summary": {
                 "base_model": selected_model_name,
                 "segment_routed_rows": routed_count,
