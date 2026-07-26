@@ -1,17 +1,15 @@
 """
-Clerk JWT authentication — verifies tokens issued by Clerk.
-No login/register endpoints needed — Clerk owns all user identity.
+Firebase JWT authentication — verifies tokens issued by Firebase Auth.
 """
 
-import time
 import uuid
+import secrets
 import logging
 from typing import Any, Dict, List, Optional
 
-import httpx
-from jose import jwt, JWTError, jwk
-from jose.utils import base64url_decode
-from fastapi import Depends, HTTPException, status
+import firebase_admin
+from firebase_admin import credentials, auth as firebase_auth
+from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.database import get_db
@@ -20,123 +18,59 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+# Initialize Firebase Admin
+if not firebase_admin._apps:
+    try:
+        if settings.FIREBASE_PRIVATE_KEY and settings.FIREBASE_PROJECT_ID and settings.FIREBASE_CLIENT_EMAIL:
+            # Clean up the private key which might have escaped newlines from env vars
+            private_key = settings.FIREBASE_PRIVATE_KEY.replace('\\n', '\n')
+            
+            cred = credentials.Certificate({
+                "type": "service_account",
+                "project_id": settings.FIREBASE_PROJECT_ID,
+                "private_key_id": "lucida",
+                "private_key": private_key,
+                "client_email": settings.FIREBASE_CLIENT_EMAIL,
+                "client_id": "lucida",
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{settings.FIREBASE_CLIENT_EMAIL.replace('@', '%40')}",
+                "universe_domain": "googleapis.com"
+            })
+            firebase_admin.initialize_app(cred)
+            logger.info("Firebase Admin initialized using provided credentials.")
+        else:
+            firebase_admin.initialize_app()
+            logger.info("Firebase Admin initialized using default credentials.")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Firebase Admin: {e}. If local dev, this is expected without credentials.")
+
 # ── Bearer scheme for FastAPI dependency injection ───────────────
 bearer_scheme = HTTPBearer()
-
-# ── JWKS Cache ───────────────────────────────────────────────────
-_jwks_cache: Optional[Dict[str, Any]] = None
-_jwks_cache_timestamp: float = 0
-JWKS_CACHE_TTL = 3600  # 1 hour in seconds
-CLERK_JWKS_URL = "https://api.clerk.com/v1/jwks"
+_optional_bearer = HTTPBearer(auto_error=False)
 
 
-def _fetch_jwks() -> Dict[str, Any]:
+def verify_firebase_token(token: str) -> Dict[str, Any]:
     """
-    Fetch Clerk's JWKS (JSON Web Key Set) from their API.
-    Caches the result for 1 hour to avoid hitting Clerk on every request.
-    """
-    global _jwks_cache, _jwks_cache_timestamp
-
-    now = time.time()
-    if _jwks_cache and (now - _jwks_cache_timestamp) < JWKS_CACHE_TTL:
-        return _jwks_cache
-
-    try:
-        headers = {"Authorization": f"Bearer {settings.CLERK_SECRET_KEY}"}
-        response = httpx.get(CLERK_JWKS_URL, headers=headers, timeout=10)
-        response.raise_for_status()
-        _jwks_cache = response.json()
-        _jwks_cache_timestamp = now
-        logger.info("Clerk JWKS refreshed (%d keys)", len(_jwks_cache.get("keys", [])))
-        return _jwks_cache
-    except Exception as e:
-        logger.error("Failed to fetch Clerk JWKS: %s", e)
-        if _jwks_cache:
-            logger.warning("Using stale JWKS cache")
-            return _jwks_cache
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to verify authentication (JWKS fetch failed)",
-        )
-
-
-def _get_signing_key(token: str) -> Dict[str, Any]:
-    """
-    Extract the signing key from JWKS that matches the token's kid header.
-    """
-    jwks = _fetch_jwks()
-    unverified_header = jwt.get_unverified_header(token)
-    kid = unverified_header.get("kid")
-
-    if not kid:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token missing 'kid' header",
-        )
-
-    for key in jwks.get("keys", []):
-        if key["kid"] == kid:
-            return key
-
-    # kid not found — force refresh JWKS once
-    global _jwks_cache_timestamp
-    _jwks_cache_timestamp = 0
-    jwks = _fetch_jwks()
-
-    for key in jwks.get("keys", []):
-        if key["kid"] == kid:
-            return key
-
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="No matching key found in Clerk JWKS",
-    )
-
-
-def verify_clerk_token(token: str) -> Dict[str, Any]:
-    """
-    Verify a Clerk-issued JWT:
-    1. Fetch JWKS (cached)
-    2. Find matching signing key by kid
-    3. Verify signature + exp claim
-    4. Return decoded payload
-
+    Verify a Firebase-issued JWT.
     Raises HTTPException 401 on any failure.
     """
     try:
-        signing_key = _get_signing_key(token)
-
-        payload = jwt.decode(
-            token,
-            signing_key,
-            algorithms=["RS256"],
-            options={
-                "verify_exp": True,
-                "verify_aud": False,  # Clerk tokens don't always have aud
-            },
-        )
+        payload = firebase_auth.verify_id_token(token)
         return payload
-
-    except JWTError as e:
-        logger.warning("JWT verification failed: %s", e)
+    except Exception as e:
+        logger.warning("Firebase JWT verification failed: %s", e)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid or expired token: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Unexpected auth error: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed",
-        )
 
 
-def _auto_provision_user(clerk_user_id: str, email: str, conn) -> Dict[str, Any]:
+def _auto_provision_user(firebase_uid: str, email: str, conn) -> Dict[str, Any]:
     """
-    Auto-provision a new tenant + user when a Clerk user hits our API
+    Auto-provision a new tenant + user when a Firebase user hits our API
     for the first time. Returns user dict.
     """
     tenant_id = str(uuid.uuid4())
@@ -148,17 +82,17 @@ def _auto_provision_user(clerk_user_id: str, email: str, conn) -> Dict[str, Any]
         [tenant_id, None, f"{email.split('@')[0]}'s Organization", "free"],
     )
 
-    # Create user
+    # Create user (store Firebase UID in the legacy `clerk_user_id` column for compatibility)
     conn.execute(
         "INSERT INTO users (id, clerk_user_id, tenant_id, email, role) VALUES (?, ?, ?, ?, ?)",
-        [user_id, clerk_user_id, tenant_id, email, "admin"],
+        [user_id, firebase_uid, tenant_id, email, "admin"],
     )
 
-    logger.info("Auto-provisioned user: clerk_id=%s email=%s tenant=%s", clerk_user_id, email, tenant_id)
+    logger.info("Auto-provisioned user: firebase_uid=%s email=%s tenant=%s", firebase_uid, email, tenant_id)
 
     return {
         "id": user_id,
-        "clerk_user_id": clerk_user_id,
+        "clerk_user_id": firebase_uid, # Reusing column name for backwards compatibility
         "tenant_id": tenant_id,
         "email": email,
         "role": "admin",
@@ -167,7 +101,7 @@ def _auto_provision_user(clerk_user_id: str, email: str, conn) -> Dict[str, Any]
 
 def _local_dev_user() -> Dict[str, Any]:
     """
-    Return (or create) a local development user for running without Clerk.
+    Return (or create) a local development user for running without Firebase credentials.
     Uses a fixed tenant/user ID so the experience is consistent across restarts.
     """
     LOCAL_TENANT_ID = "local-dev-tenant"
@@ -190,57 +124,33 @@ def _local_dev_user() -> Dict[str, Any]:
         if not result.rows:
             conn.execute(
                 "INSERT INTO users (id, clerk_user_id, tenant_id, email, role) VALUES (?, ?, ?, ?, ?)",
-                [LOCAL_USER_ID, "local_clerk_id", LOCAL_TENANT_ID, LOCAL_EMAIL, "admin"],
+                [LOCAL_USER_ID, "local_firebase_uid", LOCAL_TENANT_ID, LOCAL_EMAIL, "admin"],
             )
     except Exception as exc:
         logger.warning("Local dev auth bootstrap could not persist user records: %s", exc)
 
     return {
         "id": LOCAL_USER_ID,
-        "clerk_user_id": "local_clerk_id",
+        "clerk_user_id": "local_firebase_uid",
         "tenant_id": LOCAL_TENANT_ID,
         "email": LOCAL_EMAIL,
         "role": "admin",
     }
 
 
-# Use Optional bearer scheme so requests without tokens don't 403 in dev mode
-_optional_bearer = HTTPBearer(auto_error=False)
-
-
 def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_optional_bearer),
 ) -> Dict[str, Any]:
     """
-    FastAPI dependency — verifies Clerk JWT and returns user dict.
-
-    In LOCAL DEV mode (no CLERK_SECRET_KEY), bypasses auth entirely
-    and returns a local dev user so the API is fully usable without Clerk.
-
-    Flow (production):
-    1. Extract Bearer token
-    2. Verify with Clerk JWKS
-    3. Look up user in our DB by clerk_user_id
-    4. If not found, auto-provision (create tenant + user)
-    5. Return user dict with id, tenant_id, email, role
-
-    Usage:
-        @router.get("/protected")
-        def my_route(user: dict = Depends(get_current_user)):
-            tenant_id = user["tenant_id"]
+    FastAPI dependency — verifies Firebase JWT and returns user dict.
+    In LOCAL DEV mode, bypasses auth entirely if credentials aren't provided.
     """
     # ── LOCAL DEV BYPASS ─────────────────────────────────────
-    if not settings.CLERK_SECRET_KEY and not settings.is_production:
-        logger.debug("No CLERK_SECRET_KEY — using local dev user (auth bypassed)")
+    if not settings.is_production and not credentials:
+        logger.debug("No token provided in dev — using local dev user")
         return _local_dev_user()
 
-    if not settings.CLERK_SECRET_KEY and settings.is_production:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication is not configured for production",
-        )
-
-    # ── PRODUCTION: Clerk JWT verification ───────────────────
+    # ── PRODUCTION: Firebase JWT verification ───────────────────
     if not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -249,34 +159,34 @@ def get_current_user(
         )
 
     token = credentials.credentials
-    payload = verify_clerk_token(token)
+    payload = verify_firebase_token(token)
 
-    # Extract Clerk user ID from JWT subject (sub claim)
-    clerk_user_id = payload.get("sub")
-    if not clerk_user_id:
+    firebase_uid = payload.get("uid")
+    if not firebase_uid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token missing 'sub' claim",
+            detail="Token missing 'uid' claim",
         )
 
-    # Extract email from Clerk JWT payload
-    # Clerk stores email in various places depending on version
-    email = (
-        payload.get("email")
-        or payload.get("email_address")
-        or payload.get("primary_email_address")
-        or f"{clerk_user_id}@clerk.user"
-    )
+    email = payload.get("email") or f"{firebase_uid}@firebase.user"
 
-    # Look up user in our Turso DB
+    # Look up user in our database (using `clerk_user_id` column to store Firebase UID for compatibility)
     conn = get_db()
     result = conn.execute(
-        "SELECT id, clerk_user_id, tenant_id, email, role FROM users WHERE clerk_user_id = ?",
-        [clerk_user_id],
+        "SELECT id, clerk_user_id, tenant_id, email, role, deleted_at FROM users WHERE clerk_user_id = ?",
+        [firebase_uid],
     )
 
     if result.rows:
         row = result.rows[0]
+        
+        # Check if account is marked for deletion
+        if len(row) > 5 and row[5] is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is pending deletion and cannot be accessed.",
+            )
+            
         user = {
             "id": row[0],
             "clerk_user_id": row[1],
@@ -288,19 +198,11 @@ def get_current_user(
         return user
 
     # User not in our DB — auto-provision
-    user = _auto_provision_user(clerk_user_id, email, conn)
+    user = _auto_provision_user(firebase_uid, email, conn)
     return user
 
 
 def require_role(allowed_roles: List[str]):
-    """
-    Dependency factory for role-based access control.
-
-    Usage:
-        @router.delete("/resource")
-        def delete_resource(user: dict = Depends(require_role(["admin"]))):
-            ...
-    """
     def role_checker(user: dict = Depends(get_current_user)) -> dict:
         if user["role"] not in allowed_roles:
             raise HTTPException(
@@ -309,3 +211,91 @@ def require_role(allowed_roles: List[str]):
             )
         return user
     return role_checker
+
+def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_optional_bearer),
+    x_guest_session_id: Optional[str] = Header(None)
+) -> Dict[str, Any]:
+    """
+    Dependency that allows unauthenticated 'guest' sessions.
+    If a valid token is provided, returns the authenticated user.
+    If no token is provided but X-Guest-Session-ID is present, returns a guest user.
+    Otherwise, raises 401.
+    """
+    if credentials:
+        try:
+            return get_current_user(credentials)
+        except HTTPException:
+            # If the token is invalid or expired, we can gracefully fall back to a guest session
+            if settings.ALLOW_GUEST_ACCESS and not settings.is_production and x_guest_session_id:
+                logger.warning("Invalid token provided, falling back to guest session")
+                return {
+                    "id": f"guest_user_{x_guest_session_id}",
+                    "tenant_id": f"guest_{x_guest_session_id}",
+                    "role": "guest"
+                }
+            # If no guest session provided, raise the 401
+            raise
+    # Try local dev bypass if no credentials
+    if not settings.is_production and not credentials:
+        if settings.ALLOW_GUEST_ACCESS and x_guest_session_id:
+            return {
+                "id": f"guest_user_{x_guest_session_id}",
+                "tenant_id": f"guest_{x_guest_session_id}",
+                "role": "guest"
+            }
+        logger.debug("No token provided in dev — using local dev user")
+        return _local_dev_user()
+
+    # In production without credentials
+    if not credentials:
+        if settings.ALLOW_GUEST_ACCESS and not settings.is_production and x_guest_session_id:
+            return {
+                "id": f"guest_user_{x_guest_session_id}",
+                "tenant_id": f"guest_{x_guest_session_id}",
+                "role": "guest"
+            }
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Bearer token and no guest session provided",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # If we get here, it means credentials existed but we didn't raise or return?
+    # Actually, the logic above either returns or raises. But just in case:
+    if credentials:
+        return get_current_user(credentials)
+    raise HTTPException(status_code=401, detail="Unauthorized")
+
+def verify_admin_secret(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> bool:
+    """
+    Verify the FASTAPI_SECRET_KEY for admin routes.
+    """
+    expected_secret = settings.FASTAPI_SECRET_KEY.strip()
+    if not expected_secret or not secrets.compare_digest(
+        credentials.credentials, expected_secret
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid admin token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return True
+
+def verify_admin_email(user: dict = Depends(get_current_user)) -> dict:
+    """
+    Verify that the authenticated Firebase user has the configured ADMIN_EMAIL.
+    """
+    if not settings.ADMIN_EMAIL:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ADMIN_EMAIL is not configured on the server",
+        )
+    
+    if user.get("email") != settings.ADMIN_EMAIL:
+        logger.warning(f"Unauthorized admin access attempt by {user.get('email')}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have admin permissions.",
+        )
+    return user

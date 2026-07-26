@@ -1,6 +1,6 @@
 """
 Model management API routes — list, info, delete trained models.
-Uses raw SQL against Turso/libSQL. Protected by Clerk auth.
+Uses the configured SQL database (SQLAlchemy engine). Protected by Firebase auth.
 """
 
 import json
@@ -17,6 +17,19 @@ from app.api.scoring import trained_models, _get_model
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/models", tags=["Models"])
+
+
+def _list_training_run_model_names(conn, tenant_id: str):
+    """Return models recorded in DB metadata for the current tenant."""
+    rows = conn.execute(
+        """SELECT model_name
+           FROM training_runs
+           WHERE tenant_id = ?
+           GROUP BY model_name
+           ORDER BY MAX(created_at) DESC""",
+        [tenant_id],
+    ).rows
+    return [row[0] for row in rows if row and row[0]]
 
 
 def _feedback_summary(conn, tenant_id: str, model_name: str):
@@ -149,11 +162,12 @@ def list_models(
     """List all trained models for the current tenant."""
     tenant_id = user["tenant_id"]
 
-    # Get model names from disk
-    model_names = model_storage.list_models(tenant_id)
+    conn = get_db()
+    storage_model_names = model_storage.list_models(tenant_id)
+    metadata_model_names = _list_training_run_model_names(conn, tenant_id)
+    model_names = list(dict.fromkeys([*metadata_model_names, *storage_model_names]))
 
     # Enrich with DB metadata
-    conn = get_db()
     models = []
     for name in model_names:
         result = conn.execute(
@@ -166,10 +180,12 @@ def list_models(
 
         info = {"model_name": name}
         model = _get_model(tenant_id, name)
+        info["artifact_available"] = model is not None
         if result.rows:
             row = result.rows[0]
             info["trained_at"] = row[5]
             info["n_rows"] = row[4]
+            info["artifact_path"] = row[2]
             if row[3]:
                 try:
                     metrics = json.loads(row[3])
@@ -183,6 +199,8 @@ def list_models(
         if model and model.analyzer:
             info["target_column"] = model.analyzer.target_col
             info["target_recommendation"] = model.analyzer.get_target_diagnostics().get("recommendation")
+        elif result.rows:
+            info["target_recommendation"] = "artifact_missing"
         info["feedback_summary"] = _feedback_summary(conn, tenant_id, name)
         info["segment_hotspots"] = _segment_feedback_insights(conn, tenant_id, name)[:4]
         models.append(info)
@@ -199,11 +217,12 @@ def get_model_info(
     user: dict = Depends(get_current_user),
 ):
     """Get detailed info about a specific model."""
+    try:
+        model_name = model_storage.validate_model_name(model_name)
+    except ValueError as exc:
+        return error_response("VALIDATION_ERROR", str(exc), 400)
     tenant_id = user["tenant_id"]
     scorer = _get_model(tenant_id, model_name)
-
-    if not scorer:
-        return error_response("MODEL_NOT_FOUND", f"No model '{model_name}' found", 404)
 
     conn = get_db()
     result = conn.execute(
@@ -214,18 +233,23 @@ def get_model_info(
         [tenant_id, model_name],
     )
 
+    if not scorer and not result.rows:
+        return error_response("MODEL_NOT_FOUND", f"No model '{model_name}' found", 404)
+
     info = {
         "model_name": model_name,
-        "feature_names": scorer.scorer.feature_names if scorer.scorer else [],
-        "target_column": scorer.analyzer.target_col if scorer.analyzer else None,
-        "target_diagnostics": scorer.analyzer.get_target_diagnostics() if scorer.analyzer else {},
-        "feature_blueprint": scorer.engineer.summarize_feature_blueprint() if scorer.engineer else {},
-        "ranking_version": scorer.scorer.metadata.get("ranking_version") if scorer.scorer else None,
-        "rationale_version": scorer.scorer.metadata.get("rationale_version") if scorer.scorer else None,
+        "artifact_available": scorer is not None,
+        "feature_names": scorer.scorer.feature_names if scorer and scorer.scorer else [],
+        "target_column": scorer.analyzer.target_col if scorer and scorer.analyzer else None,
+        "target_diagnostics": scorer.analyzer.get_target_diagnostics() if scorer and scorer.analyzer else {},
+        "feature_blueprint": scorer.engineer.summarize_feature_blueprint() if scorer and scorer.engineer else {},
+        "ranking_version": scorer.scorer.metadata.get("ranking_version") if scorer and scorer.scorer else None,
+        "rationale_version": scorer.scorer.metadata.get("rationale_version") if scorer and scorer.scorer else None,
     }
 
     if result.rows:
         row = result.rows[0]
+        info["artifact_path"] = row[2]
         info["trained_at"] = row[5]
         info["n_rows"] = row[4]
         if row[3]:
@@ -233,6 +257,11 @@ def get_model_info(
                 info["metrics"] = json.loads(row[3])
             except json.JSONDecodeError:
                 pass
+    if not scorer:
+        info["target_diagnostics"] = {
+            "recommendation": "artifact_missing",
+            "message": "Training metadata exists, but the model artifact could not be loaded.",
+        }
 
     info["feedback_summary"] = _feedback_summary(conn, tenant_id, model_name)
     info["segment_hotspots"] = _segment_feedback_insights(conn, tenant_id, model_name)
@@ -264,6 +293,10 @@ def delete_model(
     user: dict = Depends(require_role(["admin"])),
 ):
     """Delete a model. Admin only."""
+    try:
+        model_name = model_storage.validate_model_name(model_name)
+    except ValueError as exc:
+        return error_response("VALIDATION_ERROR", str(exc), 400)
     tenant_id = user["tenant_id"]
 
     # Delete from disk

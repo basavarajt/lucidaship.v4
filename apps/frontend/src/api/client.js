@@ -4,18 +4,35 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 const client = axios.create({
   baseURL: API_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
 });
 
-// Optional bearer token support (for Clerk-integrated deployments)
+// Optional bearer token support (for Firebase-integrated deployments)
 client.interceptors.request.use(
   (config) => {
+    let guestSessionId = sessionStorage.getItem('guest_session_id');
+    if (!guestSessionId) {
+      guestSessionId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
+      sessionStorage.setItem('guest_session_id', guestSessionId);
+    }
+    config.headers['X-Guest-Session-ID'] = guestSessionId;
+
     const token = localStorage.getItem('access_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+
+    if (!(config.data instanceof FormData)) {
+      config.headers['Content-Type'] = config.headers['Content-Type'] || 'application/json';
+    } else {
+      if (typeof config.headers.delete === 'function') {
+        config.headers.delete('Content-Type');
+        config.headers.delete('content-type');
+      } else {
+        delete config.headers['Content-Type'];
+        delete config.headers['content-type'];
+      }
+    }
+
     return config;
   },
   (error) => Promise.reject(error)
@@ -29,27 +46,30 @@ export const authApi = {
 };
 
 export const scoringApi = {
+  appendCsvFiles: (formData, files) => {
+    files.forEach((file) => formData.append('files', file, file.name));
+    if (files.length === 1) {
+      formData.append('file', files[0], files[0].name);
+    }
+  },
+
   mergePlan: async (files) => {
     const formData = new FormData();
-    files.forEach((f) => formData.append('files', f));
+    scoringApi.appendCsvFiles(formData, files);
 
-    const response = await client.post('/merge-plan', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    const response = await client.post('/merge-plan', formData);
     return response.data;
   },
 
   // ━━ SYNC TRAINING (legacy, still works) ━━
   train: async (modelName, files, targetCol = null, mode = "supervised") => {
     const formData = new FormData();
-    files.forEach((f) => formData.append('files', f));
+    scoringApi.appendCsvFiles(formData, files);
 
     let url = `/train?model_name=${encodeURIComponent(modelName)}&mode=${encodeURIComponent(mode)}`;
     if (targetCol) url += `&target_column=${encodeURIComponent(targetCol)}`;
 
-    const response = await client.post(url, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    const response = await client.post(url, formData);
     return response.data;
   },
 
@@ -64,14 +84,12 @@ export const scoringApi = {
    */
   trainAsync: async (modelName, files, targetCol = null, mode = "supervised") => {
     const formData = new FormData();
-    files.forEach((f) => formData.append('files', f));
+    scoringApi.appendCsvFiles(formData, files);
 
     let url = `/train/async?model_name=${encodeURIComponent(modelName)}&mode=${encodeURIComponent(mode)}`;
     if (targetCol) url += `&target_column=${encodeURIComponent(targetCol)}`;
 
-    const response = await client.post(url, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    const response = await client.post(url, formData);
     return response.data;
   },
 
@@ -107,13 +125,11 @@ export const scoringApi = {
 
   score: async (modelName, files, autoSelectModel = false) => {
     const formData = new FormData();
-    files.forEach((f) => formData.append('files', f));
+    scoringApi.appendCsvFiles(formData, files);
 
     const url =
       `/score-csv?model_name=${encodeURIComponent(modelName)}&auto_select_model=${encodeURIComponent(autoSelectModel)}`;
-    const response = await client.post(url, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    const response = await client.post(url, formData);
     return response.data;
   },
 
@@ -126,9 +142,7 @@ export const scoringApi = {
     url += `&auto_retrain=${encodeURIComponent(autoRetrain)}`;
     url += `&feedback_weight=${encodeURIComponent(feedbackWeight)}`;
 
-    const response = await client.post(url, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    const response = await client.post(url, formData);
     return response.data;
   },
 

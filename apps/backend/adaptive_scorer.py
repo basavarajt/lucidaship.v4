@@ -1088,7 +1088,10 @@ class AdaptiveLeadScorer:
             'n_features': len(self.feature_names),
             'feature_names': self.feature_names,
             'accuracy': float(accuracy_score(y_eval, y_pred)),
-            'roc_auc': float(roc_auc_score(y_eval, y_proba)),
+            # A very small evaluation split can legitimately contain one class even
+            # when the complete training data is binary. ROC-AUC is undefined then;
+            # use a neutral value instead of failing an otherwise valid training run.
+            'roc_auc': float(roc_auc_score(y_eval, y_proba)) if len(np.unique(y_eval)) == 2 else 0.5,
             'precision': float(threshold_metrics['precision']),
             'recall': float(threshold_metrics['recall']),
             'precision_at_10_percent': float(self._precision_at_percent(y_eval, y_proba, 0.10)),

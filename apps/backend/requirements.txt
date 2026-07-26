@@ -1,9 +1,9 @@
-# ── Core Framework ───────────────────────────────────────────
+# Core framework
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 gunicorn==25.3.0
 
-# ── Data & ML ────────────────────────────────────────────────
+# Data and ML
 pandas==2.2.3
 scikit-learn==1.5.2
 joblib==1.4.2
@@ -12,20 +12,29 @@ scipy==1.11.4
 numpy==1.26.4
 xgboost==2.1.4
 shap==0.45.1
+google-cloud-storage==2.16.0
 
-# ── Database (Turso / libSQL) ────────────────────────────────
+# Database
 libsql-client==0.3.1
+SQLAlchemy==2.0.36
+psycopg[binary]==3.2.3
 
-# ── Authentication (Clerk JWT verification) ──────────────────
+# Authentication
 python-jose[cryptography]==3.5.0
 httpx==0.28.1
+firebase-admin==6.5.0
 
-# ── API Utilities ────────────────────────────────────────────
+# Payments and email
+dodopayments==1.108.1
+resend==2.1.0
+
+# API utilities
 pydantic==2.10.4
-pydantic-settings==2.13.1
-python-multipart==0.0.22
+pydantic-settings==2.14.2
+email-validator==2.3.0
+python-multipart==0.0.31
 python-dotenv==1.2.2
 slowapi==0.1.9
 
-# ── Testing ──────────────────────────────────────────────────
-pytest==8.3.4
+# Testing
+pytest==9.0.3

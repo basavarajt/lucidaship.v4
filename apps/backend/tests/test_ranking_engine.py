@@ -440,13 +440,15 @@ class TestComplexity:
         ranker_small = TopsisRanker(df_small)
         ranker_large = TopsisRanker(df_large)
         
-        start = time.time()
-        ranker_small.score()
-        time_small = time.time() - start
+        start = time.perf_counter()
+        for _ in range(10):
+            ranker_small.score()
+        time_small = time.perf_counter() - start
         
-        start = time.time()
-        ranker_large.score()
-        time_large = time.time() - start
+        start = time.perf_counter()
+        for _ in range(10):
+            ranker_large.score()
+        time_large = time.perf_counter() - start
         
         # Should be roughly 10x slower for 10x more rows
         assert time_large < time_small * 20  # Allow some overhead

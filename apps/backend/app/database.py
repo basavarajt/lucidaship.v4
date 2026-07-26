@@ -1,89 +1,88 @@
 """
-Database connection & table management for Turso (libSQL).
-Uses libsql_client with raw SQL — no SQLAlchemy.
+Database connection & table management.
+Uses the SQLAlchemy `engine` defined in `app.db.session` for persistent storage.
+Falls back to local SQLite (via the same engine) for development when `DATABASE_URL` is not set.
 """
 
 import logging
-import libsql_client
-import sqlite3
-from pathlib import Path
-
+from sqlalchemy import text
 from app.core.config import get_settings
+from app.db.session import engine, init_sqlalchemy
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# ── Module-level connection (lazy init) ─────────────────────────
-_connection = None
 
-class SqliteWrapper:
-    """A wrapper mimicking the basic execute().rows signature of libsql_client."""
-    def __init__(self, path):
-        if path == ":memory:":
-            self.conn = sqlite3.connect(path, check_same_thread=False, timeout=30)
-        else:
-            db_path = Path(path).expanduser().resolve()
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-            self.conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30)
-            self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA synchronous=NORMAL")
-        self.conn.execute("PRAGMA busy_timeout=30000")
+# Simple engine-backed wrapper to provide a compatible execute(...).rows API
+class EngineWrapper:
+    def __init__(self, eng):
+        self.engine = eng
+
     def execute(self, sql, args=None):
-        if args is None: args = []
-        cur = self.conn.execute(sql, args)
-        self.conn.commit()
+        args = args or []
+        # Use raw DBAPI cursor to preserve original parameter style (e.g., `?` for SQLite)
+        raw = self.engine.raw_connection()
+        try:
+            cur = raw.cursor()
+            cur.execute(sql, args)
+            try:
+                rows = cur.fetchall()
+            except Exception:
+                rows = []
+            raw.commit()
+        finally:
+            try:
+                cur.close()
+            except Exception:
+                pass
+            try:
+                raw.close()
+            except Exception:
+                pass
         class Result:
             def __init__(self, rows):
                 self.rows = rows
-        return Result(cur.fetchall())
+        return Result(rows)
+
     def close(self):
-        self.conn.close()
+        # engine is shared; nothing to close here
+        pass
+
+
+_connection = None
+
 
 def get_db():
-    """
-    Return a libsql_client to Turso, or sqlite3 wrapper locally.
-    Re-uses a module-level connection for efficiency.
+    """Return an engine-backed DB accessor. In production, `DATABASE_URL` must be set,
+    unless `ALLOW_PRODUCTION_SQLITE_FALLBACK` is true.
     """
     global _connection
     if _connection is None:
-        url = settings.TURSO_DATABASE_URL
-        token = settings.TURSO_AUTH_TOKEN
-
-        if url and token:
-            if url.startswith("libsql://"):
-                url = url.replace("libsql://", "https://")
-            
-            # Remote Turso database
-            _connection = libsql_client.create_client_sync(
-                url=url,
-                auth_token=token,
+        if settings.is_production and not settings.DATABASE_URL and not settings.ALLOW_PRODUCTION_SQLITE_FALLBACK:
+            raise RuntimeError(
+                "Production registry database is not configured. Set DATABASE_URL to a managed SQL instance "
+                "or set ALLOW_PRODUCTION_SQLITE_FALLBACK=true for temporary testing."
             )
-            logger.info("Connected to Turso: %s", url.split("@")[-1] if "@" in url else url[:40])
-        else:
-            # Local SQLite fallback for development without Turso
-            try:
-                _connection = SqliteWrapper(settings.SQLITE_DB_PATH)
-                logger.warning("No Turso credentials - using local SQLite fallback at %s", settings.SQLITE_DB_PATH)
-            except (PermissionError, OSError, sqlite3.Error) as exc:
-                logger.warning(
-                    "Local SQLite path '%s' unavailable (%s) — falling back to in-memory SQLite for this process",
-                    settings.SQLITE_DB_PATH,
-                    exc,
-                )
-                _connection = SqliteWrapper(":memory:")
+
+        _connection = EngineWrapper(engine)
 
     return _connection
+
 
 def close_db():
     global _connection
     if _connection is not None:
-        _connection.close()
+        try:
+            _connection.close()
+        except Exception:
+            pass
         _connection = None
+    engine.dispose()
 
 
 def init_db():
     """
-    Create all tables on startup. Uses raw SQL (SQLite-compatible).
+    Create all tables on startup. Uses SQL-compatible DDL statements.
     Safe to call multiple times (CREATE TABLE IF NOT EXISTS).
     """
     conn = get_db()
@@ -163,12 +162,19 @@ def init_db():
         "ALTER TABLE scored_leads ADD COLUMN lead_signature TEXT",
         "ALTER TABLE scored_leads ADD COLUMN model_name TEXT",
         "ALTER TABLE scored_leads ADD COLUMN ranking_version TEXT",
+        "ALTER TABLE tenants ADD COLUMN credits INTEGER DEFAULT 1000",
+        "ALTER TABLE tenants ADD COLUMN dodo_customer_id TEXT",
+        "ALTER TABLE tenants ADD COLUMN free_runs_used INTEGER DEFAULT 0",
+        "ALTER TABLE tenants ADD COLUMN deleted_at TEXT",
+        "ALTER TABLE users ADD COLUMN deleted_at TEXT",
     ]
     for sql in alter_statements:
         try:
             conn.execute(sql)
         except Exception:
             pass
+
+    init_sqlalchemy()
 
     logger.info("Database tables initialized")
 
@@ -178,6 +184,8 @@ def check_db_connectivity() -> bool:
     try:
         conn = get_db()
         result = conn.execute("SELECT 1")
+        with engine.connect() as sqlalchemy_conn:
+            sqlalchemy_conn.execute(text("SELECT 1"))
         return len(result.rows) > 0
     except Exception as e:
         logger.error("Database connectivity check failed: %s", e)

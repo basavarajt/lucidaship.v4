@@ -130,9 +130,26 @@ def execute_training_task(
 
         training_target = target_column
         if mode == "unsupervised":
-            merged_df = merged_df.copy()
-            merged_df["__synthetic_target__"] = (np.arange(len(merged_df)) % 2).astype(int)
-            training_target = "__synthetic_target__"
+            from app.core.target_discovery_engine import TargetDiscoveryEngine
+            engine = TargetDiscoveryEngine(merged_df)
+            options = engine.suggest_ranking_options()
+            chosen_option = 1
+            for opt in options:
+                if opt.get('type') == 'composite':
+                    chosen_option = opt['option_id']
+                    break
+            
+            df_with_synthetic, discovery_info = engine.run_discovery(user_choice=chosen_option)
+            if df_with_synthetic is None:
+                merged_df = merged_df.copy()
+                merged_df["__synthetic_target__"] = (np.arange(len(merged_df)) % 2).astype(int)
+                training_target = "__synthetic_target__"
+            else:
+                merged_df = df_with_synthetic
+                training_target = "__target__" if "__target__" in merged_df.columns else "__synthetic_target__"
+                
+            if discovery_info:
+                logger.info("Unsupervised discovery: %s", discovery_info.get('explanation'))
 
         train_result = scorer.train(
             merged_df,

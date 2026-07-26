@@ -640,6 +640,20 @@
                 </div>
             </div>
 
+            <div class="form-row" style="margin-top: 12px; margin-bottom: 8px;">
+                <div class="form-group">
+                    <label>Training Mode</label>
+                    <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
+                        <label style="display: flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: normal; font-weight: normal; color: var(--text-primary); cursor: pointer;">
+                            <input type="radio" name="trainMode" value="supervised" checked style="width: auto;"> Supervised
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: normal; font-weight: normal; color: var(--text-primary); cursor: pointer;">
+                            <input type="radio" name="trainMode" value="unsupervised" style="width: auto;"> Unsupervised (Ranking)
+                        </label>
+                    </div>
+                </div>
+            </div>
+
             <button class="btn btn-primary btn-full" id="trainBtn" onclick="trainModel()" disabled>
                 🚀 Train Model
             </button>
@@ -717,6 +731,7 @@
 </div>
 
 <script>
+const API_BASE = 'https://lucida-backend-201742003125.us-central1.run.app';
 const API = '';
 let lastResults = [];
 
@@ -780,20 +795,52 @@ async function trainModel() {
 
     const clientId = document.getElementById('clientId').value || 'default';
     const targetCol = document.getElementById('targetCol').value;
+    const mode = document.querySelector('input[name="trainMode"]:checked').value;
 
-    let url = `/train?client_id=${encodeURIComponent(clientId)}`;
-    if (targetCol) url += `&target_column=${encodeURIComponent(targetCol)}`;
+    let url = `${API_BASE}/train/async?model_name=${encodeURIComponent(clientId)}&mode=${encodeURIComponent(mode)}`;
+    if (targetCol && mode === 'supervised') url += `&target_column=${encodeURIComponent(targetCol)}`;
 
     try {
         const res = await fetch(url, { method: 'POST', body: fd });
-        const data = await res.json();
+        let data = await res.json();
 
-        if (!res.ok) throw new Error(data.detail || 'Training failed');
+        if (!res.ok) throw new Error(data.detail || 'Training failed to start');
+        
+        const jobId = data.data?.job_id;
+        if (!jobId) throw new Error('Did not receive job_id from async training endpoint');
 
         const box = document.getElementById('trainResult');
         box.classList.add('visible');
+        
+        let isComplete = false;
+        let resultData = null;
 
-        const m = data.metrics;
+        while (!isComplete) {
+            const pollRes = await fetch(`${API_BASE}/train/status/${jobId}`);
+            const pollData = await pollRes.json();
+            
+            if (pollData.data?.status === 'completed') {
+                const finalRes = await fetch(`${API_BASE}/train/${jobId}/result`);
+                const finalData = await finalRes.json();
+                resultData = finalData.data?.result;
+                isComplete = true;
+            } else if (pollData.data?.status === 'failed') {
+                throw new Error(pollData.data?.error || 'Background training failed');
+            } else {
+                // Update progress UI
+                document.getElementById('trainMetrics').innerHTML = `
+                    <div style="padding: 20px; text-align: center; color: #4b5563;">
+                        <div style="margin-bottom: 10px; font-weight: bold;">${pollData.data?.current_step || 'Processing...'}</div>
+                        <div style="width: 100%; background: #e5e7eb; border-radius: 4px; height: 10px; overflow: hidden;">
+                            <div style="width: ${pollData.data?.progress || 0}%; background: #3b82f6; height: 100%; transition: width 0.3s;"></div>
+                        </div>
+                    </div>
+                `;
+                await new Promise(r => setTimeout(r, 2000));
+            }
+        }
+
+        const m = resultData.metrics;
         document.getElementById('trainMetrics').innerHTML = `
             <div class="metric-grid">
                 <div class="metric-card">
@@ -805,17 +852,18 @@ async function trainModel() {
                     <div class="metric-label">ROC-AUC</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value">${m.n_features}</div>
+                    <div class="metric-value">${m.n_features || 0}</div>
                     <div class="metric-label">Features</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value">${m.n_train + m.n_test}</div>
+                    <div class="metric-value">${(m.n_train || 0) + (m.n_test || 0)}</div>
                     <div class="metric-label">Samples</div>
                 </div>
             </div>
+
         `;
 
-        const feats = data.analysis.top_features || [];
+        const feats = resultData.analysis?.top_features || [];
         let featsHtml = '<h4 style="font-size:14px;font-weight:600;margin:16px 0 8px">Top Feature Importance</h4><ul class="feature-list">';
         feats.forEach(([name, imp]) => {
             featsHtml += `
@@ -904,17 +952,20 @@ async function scoreLeads() {
     const clientId = document.getElementById('scoreClientId').value || 'default';
 
     try {
-        const res = await fetch(`/score-csv?client_id=${encodeURIComponent(clientId)}`, { method: 'POST', body: fd });
+        const res = await fetch(`${API_BASE}/score-csv?model_name=${encodeURIComponent(clientId)}`, { method: 'POST', body: fd });
         const data = await res.json();
 
-        if (!res.ok) throw new Error(data.detail || 'Scoring failed');
+        if (!res.ok) {
+            const errorMsg = data?.error?.message || data?.detail || 'Scoring failed with an unknown error.';
+            throw new Error(errorMsg);
+        }
 
         document.getElementById('scoreResult').classList.add('visible');
         document.getElementById('resultsCard').style.display = 'block';
-        lastResults = data.results;
+        lastResults = data.data.results;
 
         let html = '<table class="scores-table"><thead><tr><th>Rank</th><th>Score</th><th>Top Drivers</th><th>Lead Data</th></tr></thead><tbody>';
-        data.results.forEach((r, i) => {
+        data.data.results.forEach((r, i) => {
             const rank = i + 1;
             const scoreClass = r.score >= 70 ? 'score-high' : r.score >= 40 ? 'score-mid' : 'score-low';
             const drivers = (r.top_drivers || []).map(d => `<span class="driver-chip">${d}</span>`).join('');
@@ -946,7 +997,7 @@ async function scoreLeads() {
 // ── Models ──────────────────────────────────────────────────
 async function loadModels() {
     try {
-        const res = await fetch('/models');
+        const res = await fetch(`${API_BASE}/models`);
         const data = await res.json();
 
         const container = document.getElementById('modelsList');
@@ -975,7 +1026,7 @@ async function loadModels() {
 
 async function deleteModel(cid) {
     if (!confirm(`Delete model "${cid}"?`)) return;
-    await fetch(`/models/${cid}`, { method: 'DELETE' });
+    await fetch(`${API_BASE}/models/${cid}`, { method: 'DELETE' });
     loadModels();
     loadModelCount();
     refreshModelDropdown();
@@ -983,7 +1034,7 @@ async function deleteModel(cid) {
 
 async function refreshModelDropdown() {
     try {
-        const res = await fetch('/models');
+        const res = await fetch(`${API_BASE}/models`);
         const data = await res.json();
         const select = document.getElementById('scoreClientId');
         select.innerHTML = '';
@@ -999,7 +1050,7 @@ async function refreshModelDropdown() {
 
 async function loadModelCount() {
     try {
-        const res = await fetch('/models');
+        const res = await fetch(`${API_BASE}/models`);
         const data = await res.json();
         document.getElementById('modelCount').textContent = data.count;
     } catch (err) {}

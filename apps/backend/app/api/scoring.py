@@ -1,6 +1,6 @@
 """
-Scoring & Training API routes — protected by Clerk auth, scoped by tenant.
-Uses raw SQL against Turso/libSQL for all database operations.
+Scoring & Training API routes - protected by Firebase auth, scoped by tenant.
+Uses the configured SQL database (SQLAlchemy engine) for database operations.
 """
 
 import io
@@ -9,13 +9,13 @@ import uuid
 import logging
 from typing import Optional, List, Dict, Any, Tuple
 
-from fastapi import APIRouter, UploadFile, File, Query, Depends, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Query, Depends, BackgroundTasks, Request
 import pandas as pd
 import numpy as np
 from sklearn.metrics import roc_auc_score, accuracy_score, precision_score, recall_score
 
 from app.database import get_db
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, get_optional_user
 from app.core.config import get_settings
 from app.core.responses import success_response, error_response
 from app.services import model_storage
@@ -58,8 +58,78 @@ def _row_signature(data: dict) -> str:
 
 
 def _get_model(tenant_id: str, model_name: str) -> Optional[UniversalAdaptiveScorer]:
-    """Get model from cache."""
-    return trained_models.get(tenant_id, {}).get(model_name)
+    """Get model from cache, or lazily load it from storage."""
+    model = trained_models.get(tenant_id, {}).get(model_name)
+    if model is None:
+        try:
+            model = model_storage.load_model(tenant_id, model_name)
+            if tenant_id not in trained_models:
+                trained_models[tenant_id] = {}
+            trained_models[tenant_id][model_name] = model
+        except Exception as e:
+            logger.warning("Failed to lazy load model %s for tenant %s: %s", model_name, tenant_id, e)
+            artifact_path = _latest_training_artifact_path(tenant_id, model_name)
+            if artifact_path:
+                try:
+                    model = model_storage.load_model_from_path(artifact_path)
+                    trained_models.setdefault(tenant_id, {})[model_name] = model
+                    logger.info(
+                        "Loaded model from training_runs artifact path: tenant=%s model=%s",
+                        tenant_id,
+                        model_name,
+                    )
+                except Exception as artifact_exc:
+                    logger.warning(
+                        "Failed to load model %s for tenant %s from artifact_path=%s: %s",
+                        model_name,
+                        tenant_id,
+                        artifact_path,
+                        artifact_exc,
+                    )
+                    return None
+            else:
+                return None
+    return model
+
+
+def _latest_training_artifact_path(tenant_id: str, model_name: str) -> Optional[str]:
+    """Return the newest persisted artifact path for a tenant/model, if metadata exists."""
+    try:
+        conn = get_db()
+        result = conn.execute(
+            """SELECT artifact_path
+               FROM training_runs
+               WHERE tenant_id = ? AND model_name = ?
+               ORDER BY created_at DESC LIMIT 1""",
+            [tenant_id, model_name],
+        )
+        if result.rows:
+            return result.rows[0][0]
+    except Exception as exc:
+        logger.warning(
+            "Could not read training artifact path: tenant=%s model=%s error=%s",
+            tenant_id,
+            model_name,
+            exc,
+        )
+    return None
+
+
+def _list_training_run_model_names(tenant_id: str) -> List[str]:
+    """Return model names recorded in training metadata for this tenant."""
+    try:
+        conn = get_db()
+        result = conn.execute(
+            """SELECT DISTINCT model_name
+               FROM training_runs
+               WHERE tenant_id = ?
+               ORDER BY model_name ASC""",
+            [tenant_id],
+        )
+        return [row[0] for row in result.rows if row and row[0]]
+    except Exception as exc:
+        logger.warning("Could not list training-run models for tenant=%s: %s", tenant_id, exc)
+        return []
 
 
 def _extract_model_input_columns(model: UniversalAdaptiveScorer) -> set[str]:
@@ -198,7 +268,7 @@ def _choose_model_for_dataframe(
     - Default behavior: keep requested model (backward-compatible).
     - Auto-select mode: choose highest schema-compatibility model and report ambiguity.
     """
-    tenant_models = trained_models.get(tenant_id, {}) or {}
+    tenant_models = _ensure_tenant_models_loaded(tenant_id)
     input_columns = {str(c) for c in df.columns}
 
     if not tenant_models:
@@ -246,6 +316,27 @@ def _choose_model_for_dataframe(
     )
 
     if best_score < minimum_score:
+        # Fallback: if the user explicitly named a model that exists, use it
+        # rather than failing entirely due to low schema compatibility scores.
+        if requested_model != "auto" and requested_model in tenant_models:
+            logger.info(
+                "Auto-select below threshold (%.2f < %.2f), falling back to requested model '%s'",
+                best_score, minimum_score, requested_model,
+            )
+            return requested_model, tenant_models[requested_model], {
+                "status": "auto_select_fallback_to_requested",
+                "requested_model": requested_model,
+                "selected_model": requested_model,
+                "auto_selected": True,
+                "ambiguous": False,
+                "best_score": best_score,
+                "minimum_score": minimum_score,
+                "candidates": candidates[:5],
+                "message": (
+                    f"Auto-select could not confidently match a model (best score {best_score:.2f}). "
+                    f"Falling back to requested model '{requested_model}'."
+                ),
+            }
         return None, None, {
             "status": "no_confident_model_match",
             "requested_model": requested_model,
@@ -285,10 +376,26 @@ def _set_model(tenant_id: str, model_name: str, model: UniversalAdaptiveScorer):
     trained_models[tenant_id][model_name] = model
 
 
+def _ensure_tenant_models_loaded(tenant_id: str) -> Dict[str, UniversalAdaptiveScorer]:
+    """Hydrate a tenant's model cache from persistent storage when Cloud Run starts cold."""
+    tenant_models = trained_models.setdefault(tenant_id, {})
+    persisted_model_names = sorted(set(model_storage.list_models(tenant_id)) | set(_list_training_run_model_names(tenant_id)))
+
+    for model_name in persisted_model_names:
+        if model_name in tenant_models:
+            continue
+        model = _get_model(tenant_id, model_name)
+        if model is not None:
+            tenant_models[model_name] = model
+            logger.info("Lazy-loaded model into cache: tenant=%s model=%s", tenant_id, model_name)
+
+    return tenant_models
+
+
 def init_models_cache(all_models):
     """Initialize cache on startup from loaded models."""
-    global trained_models
-    trained_models = all_models
+    trained_models.clear()
+    trained_models.update(all_models or {})
 
 
 # ── Helper: Smart Merge ──────────────────────────────────────
@@ -331,29 +438,79 @@ MAX_CSV_SIZE = MAX_CSV_SIZE_MB * 1024 * 1024
 MAX_COLUMNS = 500
 
 
+async def _collect_uploaded_file_payloads(
+    file: Optional[UploadFile],
+    files: Optional[List[UploadFile]],
+    request: Optional[Request] = None,
+    context: str = "upload",
+) -> List[Tuple[str, bytes]]:
+    """Read uploaded CSV payloads, including a fallback for multipart binding issues."""
+    files_data: List[Tuple[str, bytes]] = []
+
+    if file:
+        files_data.append((file.filename or "upload.csv", await file.read()))
+
+    if files:
+        for uploaded in files:
+            files_data.append((uploaded.filename or "upload.csv", await uploaded.read()))
+
+    files_data = _dedupe_file_payloads(files_data)
+
+    if files_data or request is None:
+        return files_data
+
+    try:
+        form = await request.form()
+        form_keys = list(form.keys())
+        for key, value in form.multi_items():
+            if hasattr(value, "filename") and hasattr(value, "read"):
+                files_data.append((value.filename or f"{key}.csv", await value.read()))
+
+        files_data = _dedupe_file_payloads(files_data)
+        logger.warning(
+            "No files bound by FastAPI for %s; content_type=%s form_keys=%s recovered_files=%d",
+            context,
+            request.headers.get("content-type"),
+            form_keys,
+            len(files_data),
+        )
+    except Exception as exc:
+        logger.warning(
+            "Could not inspect multipart form for %s; content_type=%s error=%s",
+            context,
+            request.headers.get("content-type"),
+            exc,
+        )
+
+    return files_data
+
+
 async def _validate_and_ingest_files(
     file: Optional[UploadFile],
     files: Optional[List[UploadFile]],
     target_column: Optional[str] = None,
+    request: Optional[Request] = None,
+    context: str = "upload",
 ) -> List[IngestedDatasetAsset]:
     """Validate, read, and pre-compress uploaded CSV files with security checks."""
-    all_files = []
-    if file:
-        all_files.append(file)
-    if files:
-        all_files.extend(files)
+    files_data = await _collect_uploaded_file_payloads(file, files, request=request, context=context)
 
-    if not all_files:
-        raise ValueError("No files uploaded. Use field 'file' or 'files'.")
+    if not files_data:
+        content_type = request.headers.get("content-type", "missing") if request else "missing"
+        raise ValueError(
+            "No files provided. Please select at least one CSV file and retry. "
+            f"Upload content-type received: {content_type}."
+        )
 
     ingested_assets = []
-    for f in all_files:
+    for filename, contents in files_data:
         # Validate file extension
-        filename = f.filename or ""
+        filename = filename or ""
         if not filename.lower().endswith(".csv"):
             raise ValueError(f"Only .csv files accepted. Got: '{filename}'")
 
-        contents = await f.read()
+        if not contents:
+            raise ValueError(f"File '{filename}' was empty. Please choose a non-empty CSV.")
 
         # Validate file size
         if len(contents) > MAX_CSV_SIZE:
@@ -403,7 +560,7 @@ def _uploaded_dataset_names(
 def _prepare_assets(dataset_names: List[str], ingested_assets: List[IngestedDatasetAsset]) -> List[DatasetAsset]:
     return [
         DatasetAsset(
-            name=name,
+            name=ingested.name or name,
             df=ingested.raw_df,
             raw_df=ingested.raw_df,
             protected_df=ingested.protected_df,
@@ -411,7 +568,7 @@ def _prepare_assets(dataset_names: List[str], ingested_assets: List[IngestedData
             compression=ingested.diagnostics,
             execution_mode=ingested.mode,
         )
-        for name, ingested in zip(dataset_names, ingested_assets)
+        for name, ingested in zip(dataset_names or [asset.name for asset in ingested_assets], ingested_assets)
     ]
 
 
@@ -457,10 +614,23 @@ def _resolve_combined_dataset(assets: List[DatasetAsset], compression: Dict) -> 
     return prepare_combined_dataset(assets)
 
 
+def _dedupe_file_payloads(files_data: List[Tuple[str, bytes]]) -> List[Tuple[str, bytes]]:
+    """Avoid double-reading the same uploaded file when clients send file and files keys."""
+    seen = set()
+    unique = []
+    for filename, content in files_data:
+        marker = (filename, len(content), content[:128])
+        if marker in seen:
+            continue
+        seen.add(marker)
+        unique.append((filename, content))
+    return unique
+
+
 # ── Background task: persist scored leads ────────────────────
 
 def _persist_scores(tenant_id: str, model_name: str, results: list):
-    """Save scored leads to Turso DB in background (doesn't slow down response)."""
+    """Persist scored leads to the configured database in background (doesn't slow down response)."""
     try:
         conn = get_db()
 
@@ -494,14 +664,15 @@ def _persist_scores(tenant_id: str, model_name: str, results: list):
 
 @router.post("/merge-plan")
 async def merge_plan(
+    request: Request,
     file: Optional[UploadFile] = File(None),
     files: Optional[List[UploadFile]] = File(None),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_optional_user),
 ):
     """Profile uploaded datasets and recommend safe relationship-aware merge steps."""
     try:
         dataset_names = _uploaded_dataset_names(file, files)
-        ingested_assets = await _validate_and_ingest_files(file, files)
+        ingested_assets = await _validate_and_ingest_files(file, files, request=request, context="merge-plan")
         assets = _prepare_assets(dataset_names, ingested_assets)
         analysis = analyze_dataset_collection(assets)
         _, plan = prepare_combined_dataset(assets)
@@ -939,17 +1110,39 @@ def _compare_against_previous_version(
         "comparison_type": "previous_model_version",
     }
 
+from fastapi import HTTPException
+
+def _check_freemium_limits(tenant_id: str, operation: str, user_role: str = "admin"):
+    """Enforce the 'only first use is free' rule."""
+    if user_role == "guest":
+        return # Guests are already limited by the frontend to 100 rows and cannot download
+        
+    conn = get_db()
+    result = conn.execute("SELECT plan FROM tenants WHERE id = ?", [tenant_id])
+    if result.rows:
+        plan = result.rows[0][0]
+        if plan == "free":
+            if operation == "train":
+                trains = conn.execute("SELECT COUNT(*) FROM training_runs WHERE tenant_id = ?", [tenant_id]).rows[0][0]
+                if trains >= 1:
+                    raise HTTPException(status_code=403, detail="FREE_LIMIT_REACHED: You have already trained your free model. Please upgrade to train more.")
+            elif operation == "score":
+                # Check if they have scored using ANY model in the past
+                scores = conn.execute("SELECT COUNT(*) FROM scored_leads WHERE tenant_id = ?", [tenant_id]).rows[0][0]
+                if scores > 0: # If they have any scores saved, they already used their free scoring run
+                    raise HTTPException(status_code=403, detail="FREE_LIMIT_REACHED: You have already scored your free list. Please upgrade to score more.")
 
 # ── Train ────────────────────────────────────────────────────
 
 @router.post("/train")
 async def train_model(
+    request: Request,
     file: Optional[UploadFile] = File(None),
     files: Optional[List[UploadFile]] = File(None),
     model_name: str = Query("default", description="Name for this model"),
     target_column: Optional[str] = Query(None),
     mode: str = Query("supervised", description="Training mode: 'supervised' (requires binary target) or 'unsupervised' (ranks rows without labels)"),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_optional_user),
 ):
     """Upload CSVs → auto-merge → auto-train. Protected + tenant-scoped.
     
@@ -957,10 +1150,21 @@ async def train_model(
     - supervised (default): Requires a binary target column. Uses adaptive scorer for classification.
     - unsupervised: No target needed. Ranks rows using multi-criteria signals without labels.
     """
+    try:
+        model_name = model_storage.validate_model_name(model_name)
+    except ValueError as exc:
+        return error_response("VALIDATION_ERROR", str(exc), 400)
     tenant_id = user["tenant_id"]
+    _check_freemium_limits(tenant_id, "train", user.get("role", "admin"))
     try:
         dataset_names = _uploaded_dataset_names(file, files)
-        ingested_assets = await _validate_and_ingest_files(file, files, target_column=target_column)
+        ingested_assets = await _validate_and_ingest_files(
+            file,
+            files,
+            target_column=target_column,
+            request=request,
+            context="sync training",
+        )
         assets = _prepare_assets(dataset_names, ingested_assets)
         compression = _compression_summary(assets)
 
@@ -982,22 +1186,36 @@ async def train_model(
             return error_response("TOO_FEW_COLUMNS", f"Need at least 2 columns, got {df.shape[1]}", 400)
 
         if mode == "unsupervised":
-            # ── UNSUPERVISED MODE: Rank rows without needing binary target ──
+            from app.core.target_discovery_engine import TargetDiscoveryEngine
+            # ── UNSUPERVISED MODE: Discover a synthetic target using TargetDiscoveryEngine ──
+            engine = TargetDiscoveryEngine(df)
+            options = engine.suggest_ranking_options()
+            # Choose composite score if available, else first option
+            chosen_option = 1
+            for opt in options:
+                if opt.get('type') == 'composite':
+                    chosen_option = opt['option_id']
+                    break
+
+            df_with_synthetic, discovery_info = engine.run_discovery(user_choice=chosen_option)
+            if df_with_synthetic is None:
+                # Fallback if discovery fails
+                df_with_synthetic = df.copy()
+                df_with_synthetic["__synthetic_target__"] = (np.arange(len(df)) % 2).astype(int)
+
+            synthetic_target_col = "__target__" if "__target__" in df_with_synthetic.columns else "__synthetic_target__"
+
             scorer = UniversalAdaptiveScorer()
-            # Train on dummy binary target to initialize analyzer
-            # Use row index parity (even/odd) as synthetic target for initialization only
-            df_with_synthetic = df.copy()
-            df_with_synthetic["__synthetic_target__"] = (np.arange(len(df)) % 2).astype(int)
-            
-            train_result = scorer.train(df_with_synthetic, target_col="__synthetic_target__", client_id=model_name)
-            
+            train_result = scorer.train(df_with_synthetic, target_col=synthetic_target_col, client_id=model_name)
+
             # Mark this model as unsupervised so scoring knows to rank differently
             if scorer.scorer and hasattr(scorer.scorer, 'metadata'):
                 scorer.scorer.metadata['training_mode'] = 'unsupervised'
                 scorer.scorer.metadata['original_columns'] = list(df.columns)
             
             train_result["analysis"]["training_mode"] = "unsupervised"
-            train_result["analysis"]["message"] = "Trained in UNSUPERVISED mode: ranks rows by multi-criteria signals (no binary target required)"
+            explanation = discovery_info.get('explanation', 'ranks rows by multi-criteria signals')
+            train_result["analysis"]["message"] = f"Trained in UNSUPERVISED mode: {explanation}"
 
         else:
             # ── SUPERVISED MODE: Standard classification with binary target ──
@@ -1021,7 +1239,7 @@ async def train_model(
 
         persistence_warning = None
 
-        # Save training run to Turso
+        # Save training run metadata to the configured database
         try:
             run_id = str(uuid.uuid4())
             conn = get_db()
@@ -1070,12 +1288,13 @@ async def train_model(
 
 @router.post("/train/async")
 async def train_model_async(
+    request: Request,
     file: Optional[UploadFile] = File(None),
     files: Optional[List[UploadFile]] = File(None),
     model_name: str = Query("default", description="Name for this model"),
     target_column: Optional[str] = Query(None),
     mode: str = Query("supervised", description="'supervised' or 'unsupervised'"),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_optional_user),
 ):
     """
     Queue long-running training job. Returns immediately with job_id.
@@ -1085,23 +1304,43 @@ async def train_model_async(
     Response: {job_id, status, created_at}
     Then poll: GET /train/status/{job_id}
     """
+    try:
+        model_name = model_storage.validate_model_name(model_name)
+    except ValueError as exc:
+        return error_response("VALIDATION_ERROR", str(exc), 400)
     tenant_id = user["tenant_id"]
+    _check_freemium_limits(tenant_id, "train", user.get("role", "admin"))
     
     try:
-        # Read file content into memory
-        files_data = []
-        
-        if file:
-            content = await file.read()
-            files_data.append((file.filename or "upload.csv", content))
-        
-        if files:
-            for f in files:
-                content = await f.read()
-                files_data.append((f.filename or "upload.csv", content))
-        
+        files_data = await _collect_uploaded_file_payloads(
+            file,
+            files,
+            request=request,
+            context="async training",
+        )
+
         if not files_data:
-            return error_response("NO_FILES", "No files provided", 400)
+            content_type = request.headers.get("content-type", "")
+            return error_response(
+                "NO_FILES",
+                (
+                    "No files provided. Please select a CSV again and retry. "
+                    f"Upload content-type received: {content_type or 'missing'}."
+                ),
+                400,
+            )
+
+        for filename, content in files_data:
+            if not filename.lower().endswith(".csv"):
+                return error_response("VALIDATION_ERROR", f"Only .csv files accepted. Got: '{filename}'", 400)
+            if not content:
+                return error_response("VALIDATION_ERROR", f"File '{filename}' was empty. Please choose a non-empty CSV.", 400)
+            if len(content) > MAX_CSV_SIZE:
+                return error_response(
+                    "VALIDATION_ERROR",
+                    f"File '{filename}' exceeds {MAX_CSV_SIZE_MB}MB limit ({len(content) / 1024 / 1024:.1f}MB)",
+                    400,
+                )
         
         # Create job in queue
         job_id = job_queue.create_job(model_name, tenant_id)
@@ -1227,13 +1466,14 @@ async def list_training_jobs(
 
 @router.post("/score")
 async def score_csv(
+    request: Request,
     file: Optional[UploadFile] = File(None),
     files: Optional[List[UploadFile]] = File(None),
     model_name: str = Query("default", description="Model to score with"),
     auto_select_model: bool = Query(False, description="Auto-choose best model by schema compatibility"),
     include_engagement: bool = Query(True, description="Include engagement momentum scoring"),
     background_tasks: BackgroundTasks = BackgroundTasks(),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_optional_user),
 ):
     """Upload CSVs of leads to score. Protected + tenant-scoped.
     
@@ -1242,15 +1482,22 @@ async def score_csv(
     - engagement_score: Rule-based engagement momentum (auto-detected)
     - recommended_action: Based on 2x2 matrix of both scores
     """
+    try:
+        model_name = model_storage.validate_model_name(model_name)
+    except ValueError as exc:
+        return error_response("VALIDATION_ERROR", str(exc), 400)
     tenant_id = user["tenant_id"]
+    _check_freemium_limits(tenant_id, "score", user.get("role", "admin"))
 
     try:
         dataset_names = _uploaded_dataset_names(file, files)
-        ingested_assets = await _validate_and_ingest_files(file, files)
+        ingested_assets = await _validate_and_ingest_files(file, files, request=request, context="scoring")
         assets = _prepare_assets(dataset_names, ingested_assets)
         compression = _compression_summary(assets)
 
         df, merge_plan = _resolve_combined_dataset(assets, compression)
+        if df is None or df.empty:
+            return error_response("VALIDATION_ERROR", "Missing lead data or empty file provided.", 400)
         selected_model_name, scorer, model_selection = _choose_model_for_dataframe(
             tenant_id,
             requested_model=model_name,
@@ -1376,23 +1623,36 @@ async def score_csv(
         return error_response("VALIDATION_ERROR", str(e), 400)
     except Exception as e:
         logger.exception("Scoring failed")
-        return error_response("SCORING_FAILED", f"Scoring failed: {str(e)}", 500)
+        message = "Scoring failed. Please retry or contact support."
+        if not settings.is_production:
+            message = f"Scoring failed: {str(e)}"
+        return error_response("SCORING_FAILED", message, 500)
 
 
 # ── Score CSV (legacy alias) ─────────────────────────────────
 
 @router.post("/score-csv")
 async def score_csv_legacy(
+    request: Request,
     file: Optional[UploadFile] = File(None),
     files: Optional[List[UploadFile]] = File(None),
     model_name: str = Query("default"),
     auto_select_model: bool = Query(False),
     include_engagement: bool = Query(True),
     background_tasks: BackgroundTasks = BackgroundTasks(),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_optional_user),
 ):
     """Legacy alias for /score. Kept for backward compatibility."""
-    return await score_csv(file, files, model_name, auto_select_model, include_engagement, background_tasks, user)
+    return await score_csv(
+        request=request,
+        file=file,
+        files=files,
+        model_name=model_name,
+        auto_select_model=auto_select_model,
+        include_engagement=include_engagement,
+        background_tasks=background_tasks,
+        user=user,
+    )
 
 
 # ── Analyze ──────────────────────────────────────────────────
@@ -1615,6 +1875,7 @@ async def ingest_feedback(
 async def retrain_model(
     file: UploadFile = File(...),
     model_name: str = Query("default"),
+    include_features: bool = Query(True),
     user: dict = Depends(get_current_user),
 ):
     """Retrain an existing model with new data. Protected + tenant-scoped."""
@@ -1638,7 +1899,7 @@ async def retrain_model(
         artifact_path = model_storage.save_model(new_scorer, tenant_id, model_name)
         _set_model(tenant_id, model_name, new_scorer)
 
-        # Save training run to Turso
+        # Save training run metadata to the configured database
         run_id = str(uuid.uuid4())
         conn = get_db()
         conn.execute(

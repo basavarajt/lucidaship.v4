@@ -1,0 +1,16 @@
+.gcloudignore
+.git
+.gitignore
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+*.db
+*.sqlite3
+*.joblib
+model_artifacts/
+lucida_local.db
+lucida_local.db-journal
+tests/
+test_*.py

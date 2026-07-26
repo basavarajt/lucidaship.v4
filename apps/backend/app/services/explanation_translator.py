@@ -3,14 +3,25 @@ Feature Name Translator Service
 Converts technical ML feature names and SHAP values into salesperson-friendly language.
 """
 
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
+import hashlib
+import json
+import logging
 import re
+
+import httpx
+
+from app.core.config import get_settings
+
+
+logger = logging.getLogger(__name__)
 
 
 class ExplanationTranslator:
     """Translates technical feature names to plain English explanations."""
     
     def __init__(self):
+        self.settings = get_settings()
         # Feature name patterns and their translations
         self.feature_patterns = {
             # Engagement metrics
@@ -326,8 +337,189 @@ class ExplanationTranslator:
         result["score_band"] = band
         result["score_band_label"] = band_label
         result["plain_english"] = translated
+        result["llm_explanation"] = self.generate_rank_explanation(result, translated)
+        result["explanation_label"] = "Phi-3 Mini Intelligence"
+        result["explanation_source"] = result.get("llm_explanation_source", "template_fallback")
+        result["rationale_summary"] = result["llm_explanation"]
+        result["plain_english"]["summary"] = result["llm_explanation"]
         
         return result
+
+    def generate_rank_explanation(self, result: Dict[str, Any], translated: Dict[str, Any]) -> str:
+        """Generate a human-sounding explanation for why this row ranked where it did."""
+        context = self._build_llm_context(result, translated)
+        llm_explanation = None
+        if result.get("llm_explanation_source") != "template_fallback":
+            llm_explanation = self._generate_with_llm(context)
+        if llm_explanation:
+            result["llm_explanation_source"] = "phi3_mini"
+            return llm_explanation
+
+        result["llm_explanation_source"] = "template_fallback"
+        return self._generate_human_fallback(context)
+
+    def _build_llm_context(self, result: Dict[str, Any], translated: Dict[str, Any]) -> Dict[str, Any]:
+        positive = [item["text"] for item in translated.get("positive_drivers", [])[:3]]
+        negative = [item["text"] for item in translated.get("negative_drivers", [])[:3]]
+        routing = result.get("routing") or {}
+        matched_segment = routing.get("matched_segment") or {}
+        rank_movement = result.get("rank_movement") or {}
+        data = result.get("data") or {}
+
+        return {
+            "score": round(float(result.get("score", 0.0)), 2),
+            "score_band": result.get("score_band"),
+            "top_positive": positive,
+            "top_negative": negative,
+            "top_drivers": result.get("top_drivers", [])[:3],
+            "row_snapshot": self._row_snapshot(data),
+            "route_type": routing.get("route_type", "base"),
+            "used_model": routing.get("used_model"),
+            "route_reason": routing.get("reason"),
+            "matched_segment": matched_segment,
+            "rank_movement": rank_movement,
+        }
+
+    def _generate_with_llm(self, context: Dict[str, Any]) -> Optional[str]:
+        if not self.settings.LLM_EXPLANATIONS_ENABLED:
+            return None
+        if self.settings.LLM_EXPLANATION_PROVIDER.lower() != "ollama":
+            return None
+        endpoint = (self.settings.LLM_EXPLANATION_ENDPOINT or "").strip()
+        if not endpoint:
+            return None
+
+        prompt = self._build_llm_prompt(context)
+        try:
+            with httpx.Client(timeout=self.settings.LLM_EXPLANATION_TIMEOUT_SECONDS) as client:
+                response = client.post(
+                    endpoint,
+                    json={
+                        "model": self.settings.LLM_EXPLANATION_MODEL,
+                        "prompt": prompt,
+                        "stream": False,
+                        "options": {
+                            "temperature": 0.85,
+                            "num_predict": 90,
+                        },
+                    },
+                )
+                response.raise_for_status()
+                payload = response.json()
+        except Exception as exc:
+            logger.debug("LLM explanation fallback triggered: %s", exc)
+            return None
+
+        text = str(payload.get("response", "")).strip()
+        return self._clean_llm_output(text)
+
+    def _build_llm_prompt(self, context: Dict[str, Any]) -> str:
+        return (
+            "You are writing one concise, natural explanation for why a lead ranked where it did.\n"
+            "Write exactly 1-2 sentences in plain business English.\n"
+            "Be specific, human, and non-repetitive.\n"
+            "Mention what pushed the lead up or down.\n"
+            "Do not mention SHAP, features, AI, or the model.\n"
+            "Do not use bullet points.\n"
+            f"Context: {json.dumps(context, default=str)}"
+        )
+
+    def _clean_llm_output(self, text: str) -> Optional[str]:
+        if not text:
+            return None
+        cleaned = " ".join(text.replace("\n", " ").split())
+        cleaned = cleaned.strip(" -")
+        if len(cleaned) < 20:
+            return None
+        return cleaned[:400]
+
+    def _generate_human_fallback(self, context: Dict[str, Any]) -> str:
+        fingerprint = hashlib.md5(json.dumps(context, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+        variant = int(fingerprint[:2], 16) % 4
+        score = float(context.get("score", 0.0))
+        positives = context.get("top_positive", [])
+        negatives = context.get("top_negative", [])
+        route_type = context.get("route_type", "base")
+        matched_segment = context.get("matched_segment", {})
+
+        positive_text = self._join_fragments(positives[:2])
+        negative_text = self._join_fragments(negatives[:2])
+        route_text = self._route_text(route_type, matched_segment)
+
+        if score >= 80:
+            openings = [
+                "This lead ranked near the top because",
+                "This record scored higher than most because",
+                "It rose into a strong position because",
+                "This profile climbed the ranking because",
+            ]
+        elif score >= 55:
+            openings = [
+                "This lead landed in the middle of the ranking because",
+                "It stayed competitive, but not elite, because",
+                "This record shows mixed strength because",
+                "It ranked in the workable range because",
+            ]
+        else:
+            openings = [
+                "This lead ranked lower because",
+                "It fell toward the bottom because",
+                "This record lost momentum in the ranking because",
+                "It scored behind stronger leads because",
+            ]
+
+        opening = openings[variant]
+
+        if positives and negatives:
+            sentence = f"{opening} {positive_text}, but {negative_text.lower()}."
+        elif positives:
+            sentence = f"{opening} {positive_text}."
+        elif negatives:
+            sentence = f"{opening} {negative_text.lower()}."
+        else:
+            sentence = f"{opening} the profile shows only limited standout signals."
+
+        if route_text:
+            closers = [
+                f"{route_text} shaped the final position.",
+                f"{route_text} influenced the final ranking.",
+                f"{route_text} helped determine where it landed.",
+                f"{route_text} was part of the final decision.",
+            ]
+            sentence = f"{sentence} {closers[(variant + 1) % len(closers)]}"
+
+        return sentence
+
+    def _join_fragments(self, items: List[str]) -> str:
+        cleaned = [item.strip() for item in items if item and item.strip()]
+        if not cleaned:
+            return ""
+        if len(cleaned) == 1:
+            return cleaned[0]
+        return f"{cleaned[0]} and {cleaned[1]}"
+
+    def _route_text(self, route_type: str, matched_segment: Dict[str, Any]) -> str:
+        if route_type != "segment":
+            return ""
+        dimension = matched_segment.get("dimension")
+        value = matched_segment.get("value")
+        if dimension and value is not None:
+            return f"The segment-specific path for {dimension}={value}"
+        return "The segment-specific scoring path"
+
+    def _row_snapshot(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        snapshot = {}
+        ignored_tokens = ("id", "uuid", "created", "updated")
+        for key, value in data.items():
+            key_text = str(key).lower()
+            if any(token in key_text for token in ignored_tokens):
+                continue
+            if value is None or value == "":
+                continue
+            snapshot[str(key)] = value
+            if len(snapshot) >= 6:
+                break
+        return snapshot
 
 
 # Singleton instance
@@ -336,7 +528,15 @@ _translator = ExplanationTranslator()
 
 def translate_scoring_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Translate a batch of scoring results."""
-    return [_translator.enrich_scoring_result(result) for result in results]
+    llm_enabled = _translator.settings.LLM_EXPLANATIONS_ENABLED
+    max_rows = _translator.settings.LLM_EXPLANATION_MAX_ROWS
+    translated = []
+    for index, result in enumerate(results):
+        # Skip LLM entirely when disabled OR beyond max rows
+        if not llm_enabled or index >= max_rows:
+            result["llm_explanation_source"] = "template_fallback"
+        translated.append(_translator.enrich_scoring_result(result))
+    return translated
 
 
 def get_translator() -> ExplanationTranslator:

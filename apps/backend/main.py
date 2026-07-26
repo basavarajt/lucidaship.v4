@@ -1,7 +1,7 @@
 """
 Lucida – Universal Adaptive Lead Scoring API
 ─────────────────────────────────────────────
-Production-ready entry point — Clerk auth + Turso database.
+Production-ready entry point — Firebase auth + persistent DB.
 
 Run with:
   uvicorn main:app --reload          (development)
@@ -18,6 +18,7 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -36,10 +37,16 @@ settings = get_settings()
 def validate_runtime_settings():
     """Fail fast on production misconfiguration."""
     if settings.is_production:
-        if not settings.CLERK_SECRET_KEY:
-            raise RuntimeError("CLERK_SECRET_KEY must be configured in production.")
         if not any(origin.strip() and origin.strip() != "*" for origin in settings.cors_origins_list):
             raise RuntimeError("CORS_ORIGINS must include at least one explicit origin in production.")
+        if not settings.DATABASE_URL and not settings.ALLOW_PRODUCTION_SQLITE_FALLBACK:
+            raise RuntimeError(
+                "Production requires DATABASE_URL (managed SQL) or set ALLOW_PRODUCTION_SQLITE_FALLBACK=true for temporary testing."
+            )
+        if not settings.FASTAPI_SECRET_KEY or settings.FASTAPI_SECRET_KEY == "default-insecure-secret-change-me":
+            raise RuntimeError("FASTAPI_SECRET_KEY must be set to a strong deployment secret in production.")
+        if not settings.RESEND_WEBHOOK_SECRET:
+            raise RuntimeError("RESEND_WEBHOOK_SECRET must be configured in production.")
 
 
 def setup_logging():
@@ -70,7 +77,7 @@ logger = logging.getLogger("lucida")
 
 # ── Rate Limiter ─────────────────────────────────────────────
 
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
 
 
 # ── Lifespan (startup/shutdown) ──────────────────────────────
@@ -91,17 +98,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning("Starting in degraded mode — DB unavailable")
 
     # Reload saved models from disk
+    model_storage.verify_gcs_access()
     all_models = model_storage.load_all_models()
     init_models_cache(all_models)
     total = sum(len(m) for m in all_models.values())
     logger.info("Loaded %d models from disk", total)
+    
+    # Start data retention background service
+    from app.services.data_retention import start_data_retention_service
+    start_data_retention_service()
 
     yield
 
     # ── SHUTDOWN ──
     from app.database import close_db
     from app.services.job_queue import shutdown_job_queue
+    from app.services.data_retention import stop_data_retention_service
     
+    stop_data_retention_service()
     shutdown_job_queue()
     close_db()
     logger.info("Lucida shutting down")
@@ -114,12 +128,12 @@ app = FastAPI(
     description=(
         "Zero-configuration lead scoring SaaS. "
         "Upload ANY CSV → Auto-train ML model → Score leads. "
-        "Fully authenticated via Clerk, tenant-isolated, Turso-backed."
+        "Fully authenticated via Firebase, tenant-isolated, persistent DB-backed."
     ),
     version=settings.APP_VERSION,
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None if settings.is_production else "/redoc",
 )
 
 # Rate limiter
@@ -143,6 +157,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 # ── Request Logging Middleware ───────────────────────────────
@@ -164,15 +179,32 @@ async def log_requests(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add browser-facing hardening headers to every API response."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+    if settings.is_production:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
+
+
 # ── Include Routers ──────────────────────────────────────────
 
 from app.api.auth import router as auth_router
 from app.api.scoring import router as scoring_router
 from app.api.models_api import router as models_router
+from app.api.founding_members import router as founding_members_router
+from app.api.resend_admin import router as resend_admin_router
 
 app.include_router(auth_router)
 app.include_router(scoring_router)
 app.include_router(models_router)
+app.include_router(founding_members_router)
+app.include_router(resend_admin_router)
 
 
 # ── Health Check (no auth required) ─────────────────────────
@@ -214,6 +246,11 @@ async def web_ui():
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Catch unhandled exceptions and return standardised error format."""
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+    from fastapi.exception_handlers import http_exception_handler
+    if isinstance(exc, StarletteHTTPException):
+        return await http_exception_handler(request, exc)
+
     logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
     return JSONResponse(
         status_code=500,

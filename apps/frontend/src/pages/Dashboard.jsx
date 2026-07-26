@@ -1,17 +1,18 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { scoringApi, modelsApi } from '../api/client';
-import { LogOut, UploadCloud, Database, Download, CheckCircle2, Trash2, AlertCircle, Loader, File as FileIcon, Target, Activity, X, BrainCircuit } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import client, { scoringApi, modelsApi } from '../api/client';
+import { LogOut, UploadCloud, Database, Download, CheckCircle2, Trash2, AlertCircle, Loader, File as FileIcon, Target, Activity, X, BrainCircuit, Lock } from 'lucide-react';
 import ProgressBar from '../components/ProgressBar';
-
-const INVESTOR_MODE_ENABLED = import.meta.env.VITE_ENABLE_MERGE_INSPECTOR === 'true';
-const MERGE_INSPECTOR_STORAGE_KEY = 'lucida_merge_inspector_enabled';
+import UpgradeModal from '../components/UpgradeModal';
+import axios from 'axios';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const location = useLocation();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isPremium, setIsPremium] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
 
   // Tab State
   const [activeTab, setActiveTab] = useState('train'); // 'train' | 'score' | 'feedback' | 'models'
@@ -22,7 +23,9 @@ export default function Dashboard() {
 
   // Uploader State
   const [files, setFiles] = useState([]);
-  const [modelName, setModelName] = useState('Ensemble-01');
+  const [modelName, setModelName] = useState(() => {
+    return localStorage.getItem('lucida_last_model') || 'Ensemble-01';
+  });
   const [targetCol, setTargetCol] = useState('');
   const [isHovering, setIsHovering] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
@@ -39,12 +42,12 @@ export default function Dashboard() {
   const [feedbackRetrainData, setFeedbackRetrainData] = useState(null);
   const [segmentRetrainData, setSegmentRetrainData] = useState(null);
   const [viewFilter, setViewFilter] = useState('all'); // 'top100' | 'top500' | 'all' | 'worst100'
+  const [currentPage, setCurrentPage] = useState(1);
+  const LEADS_PER_PAGE = 100;
   const [outcomeColumn, setOutcomeColumn] = useState('');
   const [feedbackWeight, setFeedbackWeight] = useState(2);
   const [autoRetrainEnabled, setAutoRetrainEnabled] = useState(true);
-  const [mergePreviewData, setMergePreviewData] = useState(null);
-  const [mergePreviewLoading, setMergePreviewLoading] = useState(false);
-  const [mergeInspectorEnabled, setMergeInspectorEnabled] = useState(INVESTOR_MODE_ENABLED);
+
 
   // Registry State
   const [modelsArchive, setModelsArchive] = useState([]);
@@ -58,44 +61,35 @@ export default function Dashboard() {
       return;
     }
 
-    let profile = { email: 'admin@lucida.local', company_name: 'Local Development' };
+    let profile = { email: '', company_name: '' };
     try {
       const raw = localStorage.getItem('lucida_profile');
       if (raw) {
         profile = { ...profile, ...JSON.parse(raw) };
       }
     } catch {
-      // Ignore malformed local profile; fall back to defaults.
+      // Ignore malformed profile data.
     }
 
     setUser({
       email: profile.email,
       company_name: profile.company_name,
-      tenant_id: 'local-dev-tenant',
       role: 'admin',
     });
+
+    // Fetch up-to-date plan status from backend
+    client.get('/auth/me').then(res => {
+      if (res.data && res.data.data && res.data.data.plan !== 'free') {
+        setIsPremium(true);
+      } else {
+        setIsPremium(false);
+      }
+    }).catch(err => console.error("Failed to fetch plan:", err));
+
     setLoading(false);
   }, [navigate]);
 
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const inspectorFlag = params.get('mergeInspector');
 
-    if (inspectorFlag === '1') {
-      localStorage.setItem(MERGE_INSPECTOR_STORAGE_KEY, 'true');
-      setMergeInspectorEnabled(true);
-      return;
-    }
-
-    if (inspectorFlag === '0') {
-      localStorage.removeItem(MERGE_INSPECTOR_STORAGE_KEY);
-      setMergeInspectorEnabled(INVESTOR_MODE_ENABLED);
-      return;
-    }
-
-    const stored = localStorage.getItem(MERGE_INSPECTOR_STORAGE_KEY) === 'true';
-    setMergeInspectorEnabled(INVESTOR_MODE_ENABLED || stored);
-  }, [location.search]);
 
   useEffect(() => {
     if (activeTab === 'models') {
@@ -114,6 +108,12 @@ export default function Dashboard() {
       loadModelIntel(modelName);
     }
   }, [activeTab, modelName]);
+
+  useEffect(() => {
+    if (modelName) {
+      localStorage.setItem('lucida_last_model', modelName);
+    }
+  }, [modelName]);
 
   const loadModels = async () => {
     setModelsLoading(true);
@@ -149,7 +149,6 @@ export default function Dashboard() {
     setActiveTab(tab);
     setError(null);
     setFiles([]);
-    setMergePreviewData(null);
   };
 
   const handleDrop = (e) => {
@@ -201,41 +200,43 @@ export default function Dashboard() {
       }
       setFiles([]);
     } catch (err) {
-      const backendErr = err.response?.data?.error?.message;
-      const detailErr = err.response?.data?.detail;
-      setError(backendErr || detailErr || err.message || "An unexpected anomaly occurred.");
+      const backendErr = err.response?.data?.error?.message || err.response?.data?.detail;
+      
+      if (backendErr && backendErr.includes("FREE_LIMIT_REACHED")) {
+        setShowUpgradeModal(true);
+      } else {
+        setError(backendErr || err.message || "An unexpected anomaly occurred.");
+      }
     } finally {
       setActionLoading(false);
       setProgressType(null);
     }
   };
 
-  const inspectMergePlan = async () => {
-    if (files.length === 0) {
-      setError("Please stage at least one CSV payload.");
-      return;
-    }
-    setMergePreviewLoading(true);
-    setError(null);
-    try {
-      const resp = await scoringApi.mergePlan(files);
-      setMergePreviewData(resp.data);
-    } catch (err) {
-      const backendErr = err.response?.data?.error?.message;
-      const detailErr = err.response?.data?.detail;
-      setError(backendErr || detailErr || err.message || "Merge inspection failed.");
-    } finally {
-      setMergePreviewLoading(false);
-    }
-  };
+
 
   const handleDeleteModel = async (mName) => {
-    if (!window.confirm(`Are you absolutely sure you want to annihilate model '${mName}'? This implies total destruction and cannot be reversed.`)) return;
+    if (!window.confirm(`Are you sure you want to delete model '${mName}'? This action cannot be undone.`)) return;
     try {
       await modelsApi.delete(mName);
       setModelsArchive(prev => prev.filter(m => m.model_name !== mName));
     } catch (err) {
-      setError(err.response?.data?.detail || "Delete Command Rejected: Elevated Admin Status Required.");
+      setError(err.response?.data?.detail || "Failed to delete model. Please try again.");
+    }
+  };
+
+  const handleCancelSubscription = async () => {
+    setActionLoading(true);
+    setError(null);
+    try {
+      await client.post('/billing/cancel');
+      setShowCancelModal(false);
+      alert("Cancellation requested successfully. A support ticket has been created on your behalf.");
+    } catch (err) {
+      setError(err.response?.data?.detail || "Failed to submit cancellation request. Please email support directly.");
+      setShowCancelModal(false);
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -293,6 +294,11 @@ export default function Dashboard() {
     } else {
       rowsToExport = scoringData.results;
       filterSuffix = 'all';
+    }
+
+    if (!isPremium && rowsToExport.length > 100) {
+      setShowUpgradeModal(true);
+      return;
     }
 
     const headers = ['Rank', 'Profile_Score_%', 'Engagement_Score_%', 'Recommended_Action', 'Action_Priority', 'Top_Leading_Factors', 'Top_Engagement_Signals'];
@@ -372,10 +378,25 @@ export default function Dashboard() {
             <div className="flex items-center gap-8">
               <div className="flex items-center gap-2 font-mono text-[0.6rem] tracking-[0.15em] uppercase text-dim">
                 <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse"></span>
-                <span className="hidden md:inline">Tenant: {user?.tenant_id.substring(0,8)}</span>
+                <span className="hidden md:inline">{user?.company_name || user?.email}</span>
               </div>
+              {isPremium ? (
+                <button 
+                  onClick={() => setShowCancelModal(true)}
+                  className="font-mono text-[0.6rem] tracking-[0.15em] uppercase px-4 py-2 border border-red-500/50 text-red-400 rounded hover:bg-red-500/10 transition-colors"
+                >
+                  Cancel Plan
+                </button>
+              ) : (
+                <button 
+                  onClick={() => setShowUpgradeModal(true)}
+                  className="font-mono text-[0.6rem] tracking-[0.15em] uppercase px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded hover:opacity-90 transition-opacity"
+                >
+                  Upgrade
+                </button>
+              )}
               <button onClick={handleLogout} className="font-mono text-[0.6rem] tracking-[0.15em] uppercase border border-line px-4 py-2 text-dim hover:text-white hover:border-white transition-colors flex items-center gap-2">
-                Disconnect <LogOut className="w-3 h-3" />
+                Sign Out <LogOut className="w-3 h-3" />
               </button>
             </div>
           </div>
@@ -386,7 +407,7 @@ export default function Dashboard() {
       <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-12 relative z-10">
         
         <header className="mb-12 text-center">
-          <div className="font-mono text-[0.65rem] tracking-[0.25em] uppercase text-accent mb-4">Command Center</div>
+          <div className="font-mono text-[0.65rem] tracking-[0.25em] uppercase text-accent mb-4">Dashboard</div>
           <h1 className="text-4xl md:text-5xl font-serif font-light mb-4">Adaptive Lead Scorer</h1>
           <p className="text-dim font-light max-w-2xl mx-auto">Upload any CSV → auto-detect patterns → get ML-powered lead scores. Zero configuration needed.</p>
         </header>
@@ -431,8 +452,8 @@ export default function Dashboard() {
         {activeTab === 'train' && (
           <section className="fade-in space-y-8">
             <div className="glass-card p-8 border border-line bg-surface/30">
-              <h3 className="font-serif text-2xl font-light mb-2">Initialize Ensemble</h3>
-              <p className="text-dim text-sm mb-6 font-light">Upload a CSV with historical lead data. The system auto-detects columns, target variable, and dynamically trains an ML model.</p>
+              <h3 className="font-serif text-2xl font-light mb-2">Train a New Model</h3>
+              <p className="text-dim text-sm mb-6 font-light">Upload a CSV with historical lead data. The system auto-detects columns, target variable, and trains an ML model.</p>
               
               <div 
                 onDragOver={(e) => { e.preventDefault(); setIsHovering(true); }}
@@ -443,8 +464,8 @@ export default function Dashboard() {
               >
                 <input type="file" ref={fileInputRef} className="hidden" multiple accept=".csv" onChange={handleChange} />
                 <UploadCloud className={`w-8 h-8 mb-4 ${isHovering ? 'text-accent' : 'text-dim'}`} />
-                <span className="font-serif text-xl font-light mb-2 text-white">Drop CSV packets here</span>
-                <span className="font-mono text-[0.6rem] tracking-[0.1em] text-dim">Smart Merge will auto-join arrays by unique IDs</span>
+                <span className="font-serif text-xl font-light mb-2 text-white">Drop CSV files here</span>
+                <span className="font-mono text-[0.6rem] tracking-[0.1em] text-dim">Upload multiple files to auto-join by matching columns</span>
               </div>
 
               {files.length > 0 && (
@@ -463,7 +484,7 @@ export default function Dashboard() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                 <div className="form-group mb-0 relative group">
-                  <label className="block font-mono text-[0.6rem] tracking-[0.25em] uppercase text-dim mb-3">Workspace Model ID</label>
+                  <label className="block font-mono text-[0.6rem] tracking-[0.25em] uppercase text-dim mb-3">Model Name</label>
                   <input type="text" value={modelName} onChange={(e) => setModelName(e.target.value)} disabled={actionLoading} className="glass-input px-4 py-3 text-sm w-full" placeholder="Ensemble-01" />
                 </div>
                 <div className="form-group mb-0 relative group">
@@ -515,91 +536,10 @@ export default function Dashboard() {
               />
 
               <button onClick={executePipeline} disabled={actionLoading || files.length === 0} className="btn-primary w-full flex justify-center items-center py-4 text-sm tracking-widest">
-                {actionLoading ? <Loader className="w-5 h-5 animate-spin" /> : 'EXECUTE TRAINING SEQUENCE'}
+                {actionLoading ? <Loader className="w-5 h-5 animate-spin" /> : 'TRAIN MODEL'}
               </button>
 
-              {mergeInspectorEnabled && (
-                <div className="mt-4 border border-line bg-black/40 p-4">
-                  <div className="flex items-center justify-between gap-4 flex-wrap">
-                    <div>
-                      <div className="font-mono text-[0.55rem] tracking-[0.2em] uppercase text-accent mb-1">Investor Inspector</div>
-                      <p className="text-xs text-dim">Optional relationship audit for demos and investor walkthroughs. Hidden in normal customer mode.</p>
-                    </div>
-                    <button
-                      onClick={inspectMergePlan}
-                      disabled={mergePreviewLoading || files.length === 0}
-                      className="btn-outline px-5 py-2 text-[0.6rem]"
-                    >
-                      {mergePreviewLoading ? 'INSPECTING...' : 'INSPECT MERGE PLAN'}
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
-
-            {mergeInspectorEnabled && mergePreviewData && (
-              <div className="glass-card p-8 border border-line bg-surface/20 fade-in">
-                <div className="flex justify-between items-center mb-6 gap-4 flex-wrap">
-                  <div>
-                    <h3 className="font-serif text-2xl font-light">Dataset Relationship Audit</h3>
-                    <p className="text-dim text-sm mt-2">This panel is for demos only. Training still remains a single-step action for sales users.</p>
-                  </div>
-                  <div className="font-mono text-[0.6rem] tracking-[0.18em] uppercase text-accent">
-                    {mergePreviewData.merge_plan?.strategy || 'analysis'}
-                  </div>
-                </div>
-
-                {mergePreviewData.merge_plan?.warnings?.length > 0 && (
-                  <div className="mb-6 border border-amber-500/30 bg-amber-500/10 p-4">
-                    <div className="font-mono text-[0.55rem] tracking-[0.18em] uppercase text-amber-300 mb-2">Warnings</div>
-                    <div className="space-y-2 text-sm text-amber-100">
-                      {mergePreviewData.merge_plan.warnings.map((warning) => (
-                        <p key={warning}>{warning}</p>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="grid md:grid-cols-3 gap-4 mb-6">
-                  <div className="p-4 bg-black border border-line">
-                    <div className="font-mono text-[0.55rem] tracking-[0.18em] uppercase text-dim mb-2">Base Dataset</div>
-                    <div className="text-sm text-white">{mergePreviewData.merge_plan?.base_dataset || 'n/a'}</div>
-                  </div>
-                  <div className="p-4 bg-black border border-line">
-                    <div className="font-mono text-[0.55rem] tracking-[0.18em] uppercase text-dim mb-2">Result Rows</div>
-                    <div className="text-sm text-white">{mergePreviewData.merge_plan?.result_shape?.rows ?? 'n/a'}</div>
-                  </div>
-                  <div className="p-4 bg-black border border-line">
-                    <div className="font-mono text-[0.55rem] tracking-[0.18em] uppercase text-dim mb-2">Result Columns</div>
-                    <div className="text-sm text-white">{mergePreviewData.merge_plan?.result_shape?.columns ?? 'n/a'}</div>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  {(mergePreviewData.merge_plan?.executed_steps || []).length === 0 && (
-                    <p className="text-sm text-dim">No safe merge steps were executed for this upload set.</p>
-                  )}
-                  {(mergePreviewData.merge_plan?.executed_steps || []).map((step) => (
-                    <div key={`${step.dataset}-${step.left_column}-${step.right_column}`} className="border border-line bg-black p-4">
-                      <div className="flex justify-between items-center gap-4 flex-wrap">
-                        <div>
-                          <div className="text-sm text-white">{step.dataset}</div>
-                          <div className="text-xs text-dim mt-1">
-                            {step.left_column} → {step.right_column}
-                          </div>
-                        </div>
-                        <div className="flex gap-2 flex-wrap">
-                          <span className="tag text-[0.5rem] tracking-widest">{step.strategy}</span>
-                          <span className="tag text-[0.5rem] tracking-widest">{step.join_shape}</span>
-                          <span className="tag text-[0.5rem] tracking-widest">confidence {Math.round((step.confidence || 0) * 100)}%</span>
-                          <span className="tag text-[0.5rem] tracking-widest">coverage {Math.round((step.coverage || 0) * 100)}%</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {/* Train Results */}
             {trainingData && (
@@ -685,7 +625,7 @@ export default function Dashboard() {
           <section className="fade-in space-y-8">
             <div className="glass-card p-8 border border-line bg-surface/30">
               <h3 className="font-serif text-2xl font-light mb-2">Score Prospects</h3>
-              <p className="text-dim text-sm mb-6 font-light">Upload a CSV of leads to blindly score against an existing model. They will be ranked by conversion probability.</p>
+              <p className="text-dim text-sm mb-6 font-light">Upload a CSV of leads to score against an existing model. They will be ranked by conversion probability.</p>
               
               <div 
                 onDragOver={(e) => { e.preventDefault(); setIsHovering(true); }}
@@ -715,7 +655,7 @@ export default function Dashboard() {
               )}
 
               <div className="form-group mb-8 relative group w-full md:w-1/2">
-                <label className="block font-mono text-[0.6rem] tracking-[0.25em] uppercase text-dim mb-3">Utilize Architecture Payload</label>
+                <label className="block font-mono text-[0.6rem] tracking-[0.25em] uppercase text-dim mb-3">Select Model</label>
                 <label className="flex items-center gap-3 mb-3 px-3 py-2 border border-line bg-surface/60 hover:border-accent/40 transition-colors cursor-pointer">
                   <input
                     type="checkbox"
@@ -771,7 +711,7 @@ export default function Dashboard() {
               />
 
               <button onClick={executePipeline} disabled={actionLoading || files.length === 0} className="btn-primary w-full flex justify-center items-center py-4 text-sm tracking-widest bg-emerald-600/20 text-emerald-500 border-emerald-500/50 hover:bg-emerald-600/30">
-                {actionLoading ? <Loader className="w-5 h-5 animate-spin" /> : 'EXECUTE SCORING SEQUENCE'}
+                {actionLoading ? <Loader className="w-5 h-5 animate-spin" /> : 'SCORE LEADS'}
               </button>
             </div>
 
@@ -783,24 +723,32 @@ export default function Dashboard() {
               const possibleThresholds = [100, 500, 1000, 5000, 10000, 50000];
               const topFilters = possibleThresholds.filter(n => n < total);
               
-              // Determine displayed rows
-              let displayedRows;
+              // Determine filtered rows
+              let filteredRows;
               let filterLabel;
               
               if (viewFilter === 'worst100') {
-                displayedRows = [...scoringData.results].reverse().slice(0, 100);
+                filteredRows = [...scoringData.results].reverse().slice(0, 100);
                 filterLabel = `Lowest ${Math.min(100, total)} of ${total}`;
               } else if (viewFilter.startsWith('top')) {
                 const n = parseInt(viewFilter.replace('top', ''));
-                displayedRows = scoringData.results.slice(0, n);
+                filteredRows = scoringData.results.slice(0, n);
                 filterLabel = `Top ${Math.min(n, total)} of ${total}`;
               } else {
-                displayedRows = scoringData.results;
+                filteredRows = scoringData.results;
                 filterLabel = `All ${total} rows`;
               }
 
+              // Pagination
+              const totalFiltered = filteredRows.length;
+              const totalPages = Math.max(1, Math.ceil(totalFiltered / LEADS_PER_PAGE));
+              const safePage = Math.min(currentPage, totalPages);
+              const startIdx = (safePage - 1) * LEADS_PER_PAGE;
+              const endIdx = Math.min(startIdx + LEADS_PER_PAGE, totalFiltered);
+              const displayedRows = filteredRows.slice(startIdx, endIdx);
+
               return (
-              <div className="glass-card border border-line overflow-hidden rounded-xl p-0 fade-in">
+              <div className="glass-card border border-line overflow-hidden rounded-xl p-0 fade-in" style={{ maxWidth: 'none', margin: '0 -1rem' }}>
                 <div className="p-6 border-b border-line bg-surface flex justify-between items-center flex-wrap gap-4">
                   <div>
                     <h3 className="font-serif text-xl font-light text-white mb-1">Ranked Matrix: {scoringData.model_name}</h3>
@@ -894,162 +842,223 @@ export default function Dashboard() {
                 {/* View Filter Bar */}
                 <div className="bg-surface/50 border-b border-line px-6 py-3 flex justify-between items-center flex-wrap gap-4">
                   <div className="flex gap-2 flex-wrap">
-                    <button onClick={() => setViewFilter('all')} className={`font-mono text-[0.55rem] tracking-[0.15em] uppercase px-4 py-1.5 border transition-colors ${viewFilter === 'all' ? 'border-accent text-accent bg-accent/10' : 'border-line text-dim hover:text-white hover:border-white'}`}>All Rows</button>
+                    <button onClick={() => { setViewFilter('all'); setCurrentPage(1); }} className={`font-mono text-[0.55rem] tracking-[0.15em] uppercase px-4 py-1.5 border transition-colors ${viewFilter === 'all' ? 'border-accent text-accent bg-accent/10' : 'border-line text-dim hover:text-white hover:border-white'}`}>All Rows</button>
                     {topFilters.map(n => (
-                      <button key={n} onClick={() => setViewFilter(`top${n}`)} className={`font-mono text-[0.55rem] tracking-[0.15em] uppercase px-4 py-1.5 border transition-colors ${viewFilter === `top${n}` ? 'border-accent text-accent bg-accent/10' : 'border-line text-dim hover:text-white hover:border-white'}`}>Top {n >= 1000 ? `${n/1000}K` : n}</button>
+                      <button key={n} onClick={() => { setViewFilter(`top${n}`); setCurrentPage(1); }} className={`font-mono text-[0.55rem] tracking-[0.15em] uppercase px-4 py-1.5 border transition-colors ${viewFilter === `top${n}` ? 'border-accent text-accent bg-accent/10' : 'border-line text-dim hover:text-white hover:border-white'}`}>Top {n >= 1000 ? `${n/1000}K` : n}</button>
                     ))}
-                    {total > 100 && <button onClick={() => setViewFilter('worst100')} className={`font-mono text-[0.55rem] tracking-[0.15em] uppercase px-4 py-1.5 border transition-colors ${viewFilter === 'worst100' ? 'border-red-500 text-red-400 bg-red-500/10' : 'border-line text-dim hover:text-white hover:border-white'}`}>Worst 100</button>}
+                    {total > 100 && <button onClick={() => { setViewFilter('worst100'); setCurrentPage(1); }} className={`font-mono text-[0.55rem] tracking-[0.15em] uppercase px-4 py-1.5 border transition-colors ${viewFilter === 'worst100' ? 'border-red-500 text-red-400 bg-red-500/10' : 'border-line text-dim hover:text-white hover:border-white'}`}>Worst 100</button>}
                   </div>
                   <div className="font-mono text-[0.55rem] tracking-[0.1em] text-dim">
                     Displaying {filterLabel}
                   </div>
                 </div>
 
+                {/* Pagination Top Bar */}
+                {totalPages > 1 && (
+                  <div className="bg-black/60 border-b border-line px-6 py-3 flex justify-between items-center flex-wrap gap-3">
+                    <div className="font-mono text-[0.55rem] tracking-[0.15em] text-dim uppercase">
+                      Showing {startIdx + 1}–{endIdx} of {totalFiltered} leads
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setCurrentPage(1)}
+                        disabled={safePage <= 1}
+                        className={`font-mono text-[0.55rem] tracking-[0.12em] uppercase px-3 py-1.5 border transition-colors ${safePage <= 1 ? 'border-line/30 text-dim/30 cursor-not-allowed' : 'border-line text-dim hover:text-white hover:border-white'}`}
+                      >
+                        First
+                      </button>
+                      <button
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        disabled={safePage <= 1}
+                        className={`font-mono text-[0.55rem] tracking-[0.12em] uppercase px-4 py-1.5 border transition-colors ${safePage <= 1 ? 'border-line/30 text-dim/30 cursor-not-allowed' : 'border-line text-dim hover:text-white hover:border-white'}`}
+                      >
+                        ← Previous
+                      </button>
+                      <span className="font-mono text-[0.6rem] tracking-[0.1em] text-accent px-3">
+                        Page {safePage} of {totalPages}
+                      </span>
+                      <button
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        disabled={safePage >= totalPages}
+                        className={`font-mono text-[0.55rem] tracking-[0.12em] uppercase px-4 py-1.5 border transition-colors ${safePage >= totalPages ? 'border-line/30 text-dim/30 cursor-not-allowed' : 'border-accent text-accent hover:bg-accent/10'}`}
+                      >
+                        Next →
+                      </button>
+                      <button
+                        onClick={() => setCurrentPage(totalPages)}
+                        disabled={safePage >= totalPages}
+                        className={`font-mono text-[0.55rem] tracking-[0.12em] uppercase px-3 py-1.5 border transition-colors ${safePage >= totalPages ? 'border-line/30 text-dim/30 cursor-not-allowed' : 'border-line text-dim hover:text-white hover:border-white'}`}
+                      >
+                        Last
+                      </button>
+                    </div>
+                  </div>
+                )}
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-black border-b border-line font-mono text-[0.6rem] tracking-[0.2em] uppercase text-dim">
-                        <th className="py-4 px-6 font-normal">Rank</th>
-                        <th className="py-4 px-6 font-normal">Profile Score</th>
-                        <th className="py-4 px-6 font-normal">Engagement</th>
-                        <th className="py-4 px-6 font-normal min-w-[140px]">Action</th>
-                        <th className="py-4 px-6 font-normal min-w-[220px]">Route</th>
-                        <th className="py-4 px-6 font-normal min-w-[300px]">Top Accelerating Factors</th>
-                        <th className="py-4 px-6 font-normal min-w-[360px]">Ranking Rationale</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {displayedRows.map((row, i) => {
-                        const originalRank = viewFilter === 'worst100' 
-                          ? total - i 
-                          : (viewFilter === 'all' ? i + 1 : i + 1);
-                        const profileScore = row.profile_score ?? row.score;
-                        const engagementScore = row.engagement_score;
-                        const hasEngagement = engagementScore !== null && engagementScore !== undefined;
-                        return (
-                        <tr key={i} className="border-b border-line/50 hover:bg-surface/50 transition-colors group">
-                          <td className="py-4 px-6 font-serif text-xl text-dim group-hover:text-white transition-colors">#{originalRank}</td>
-                          {/* Profile Score */}
-                          <td className="py-4 px-6">
-                              <div className="flex items-center gap-3">
-                                  <span className="font-mono text-lg text-white">{profileScore.toFixed(1)}<span className="text-[0.6em] text-dim">%</span></span>
-                                  <div className="w-[80px] h-1 bg-line rounded-full overflow-hidden">
-                                    <div className="h-full bg-emerald-500" style={{ width: `${Math.min(profileScore, 100)}%` }}></div>
-                                  </div>
-                              </div>
-                              <div className="text-[0.5rem] text-dim mt-1 uppercase tracking-wider">Profile Match</div>
-                          </td>
-                          {/* Engagement Score */}
-                          <td className="py-4 px-6">
-                            {hasEngagement ? (
-                              <div>
-                                <div className="flex items-center gap-3">
-                                  <span className="font-mono text-lg text-white">{engagementScore.toFixed(1)}<span className="text-[0.6em] text-dim">%</span></span>
-                                  <div className="w-[80px] h-1 bg-line rounded-full overflow-hidden">
-                                    <div className={`h-full ${engagementScore >= 50 ? 'bg-sky-500' : 'bg-amber-500'}`} style={{ width: `${Math.min(engagementScore, 100)}%` }}></div>
-                                  </div>
-                                </div>
-                                <div className="text-[0.5rem] text-dim mt-1 uppercase tracking-wider">Momentum</div>
-                                {row.top_engagement_signals?.length > 0 && (
-                                  <div className="flex flex-wrap gap-1 mt-2">
-                                    {row.top_engagement_signals.slice(0, 2).map((sig, idx) => (
-                                      <span key={idx} className="tag text-[0.45rem] tracking-widest border-sky-500/30 text-sky-300">{sig}</span>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-xs text-dim">No engagement data</span>
-                            )}
-                          </td>
-                          {/* Recommended Action */}
-                          <td className="py-4 px-6">
-                            {row.recommended_action ? (
-                              <div className="space-y-2">
-                                <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold ${
-                                  row.action_color === 'green' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
-                                  row.action_color === 'yellow' ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30' :
-                                  row.action_color === 'orange' ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30' :
-                                  'bg-red-500/20 text-red-300 border border-red-500/30'
-                                }`}>
-                                  <span>{row.action_emoji}</span>
-                                  <span>{row.recommended_action}</span>
-                                </span>
-                                <div className="text-[0.55rem] text-dim leading-relaxed">{row.action_description}</div>
-                                {row.action_confidence && (
-                                  <span className={`tag text-[0.45rem] tracking-widest ${
-                                    row.action_confidence === 'high' ? 'border-emerald-500/30 text-emerald-300' :
-                                    row.action_confidence === 'medium' ? 'border-yellow-500/30 text-yellow-300' :
-                                    'border-dim/30 text-dim'
-                                  }`}>
-                                    {row.action_confidence} confidence
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-xs text-dim">—</span>
-                            )}
-                          </td>
-                          <td className="py-4 px-6">
-                            <div className="space-y-2">
-                              <span className={`tag text-[0.5rem] tracking-widest ${
-                                row.routing?.route_type === 'segment'
-                                  ? 'border-sky-500/40 text-sky-300'
-                                  : 'border-line text-dim'
-                              }`}>
-                                {row.routing?.route_type === 'segment' ? 'segment route' : 'base route'}
+                {/* Responsive Card-Based Lead List */}
+                <div className="divide-y divide-line/40">
+                  {displayedRows.map((row, i) => {
+                    const globalIdx = startIdx + i;
+                    const originalRank = viewFilter === 'worst100' 
+                      ? total - globalIdx 
+                      : globalIdx + 1;
+                    const profileScore = row.profile_score ?? row.score;
+                    const engagementScore = row.engagement_score;
+                    const hasEngagement = engagementScore !== null && engagementScore !== undefined;
+                    return (
+                    <div key={globalIdx} className="px-5 py-4 hover:bg-surface/40 transition-colors">
+                      {/* Row 1: Rank + Scores + Action badge */}
+                      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mb-3">
+                        {/* Rank */}
+                        <div className="font-serif text-2xl text-dim" style={{ minWidth: '60px' }}>#{originalRank}</div>
+                        
+                        {/* Profile Score */}
+                        <div className="flex items-center gap-2">
+                          <div className="font-mono text-[0.55rem] tracking-[0.15em] uppercase text-dim">Profile</div>
+                          <span className="font-mono text-base text-white">{profileScore.toFixed(1)}<span className="text-[0.6em] text-dim">%</span></span>
+                          <div className="w-[60px] h-1 bg-line rounded-full overflow-hidden">
+                            <div className="h-full bg-emerald-500" style={{ width: `${Math.min(profileScore, 100)}%` }}></div>
+                          </div>
+                        </div>
+
+                        {/* Engagement Score */}
+                        {hasEngagement && (
+                          <div className="flex items-center gap-2">
+                            <div className="font-mono text-[0.55rem] tracking-[0.15em] uppercase text-dim">Engagement</div>
+                            <span className="font-mono text-base text-white">{engagementScore.toFixed(1)}<span className="text-[0.6em] text-dim">%</span></span>
+                            <div className="w-[60px] h-1 bg-line rounded-full overflow-hidden">
+                              <div className={`h-full ${engagementScore >= 50 ? 'bg-sky-500' : 'bg-amber-500'}`} style={{ width: `${Math.min(engagementScore, 100)}%` }}></div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Action Badge */}
+                        {row.recommended_action && (
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold ${
+                            row.action_color === 'green' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+                            row.action_color === 'yellow' ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30' :
+                            row.action_color === 'orange' ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30' :
+                            'bg-red-500/20 text-red-300 border border-red-500/30'
+                          }`}>
+                            <span>{row.action_emoji}</span>
+                            <span>{row.recommended_action}</span>
+                          </span>
+                        )}
+                        {row.action_confidence && (
+                          <span className={`tag text-[0.45rem] tracking-widest ${
+                            row.action_confidence === 'high' ? 'border-emerald-500/30 text-emerald-300' :
+                            row.action_confidence === 'medium' ? 'border-yellow-500/30 text-yellow-300' :
+                            'border-dim/30 text-dim'
+                          }`}>
+                            {row.action_confidence} confidence
+                          </span>
+                        )}
+
+                        {/* Route tag */}
+                        <span className={`tag text-[0.45rem] tracking-widest ${
+                          row.routing?.route_type === 'segment'
+                            ? 'border-sky-500/40 text-sky-300'
+                            : 'border-line text-dim'
+                        }`}>
+                          {row.routing?.route_type === 'segment' ? 'segment route' : 'base route'}
+                        </span>
+                      </div>
+
+                      {/* Row 2: Factors + Engagement signals */}
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {row.top_drivers.map((drv, idx) => (
+                          <span key={idx} className="tag text-[0.45rem] tracking-widest">{drv}</span>
+                        ))}
+                        {hasEngagement && row.top_engagement_signals?.length > 0 && (
+                          <>
+                            <span className="text-line mx-1">|</span>
+                            {row.top_engagement_signals.slice(0, 2).map((sig, idx) => (
+                              <span key={`eng-${idx}`} className="tag text-[0.45rem] tracking-widest border-sky-500/30 text-sky-300">{sig}</span>
+                            ))}
+                          </>
+                        )}
+                        {row.rationale?.top_negative?.length > 0 && (
+                          <>
+                            <span className="text-line mx-1">|</span>
+                            {row.rationale.top_negative.slice(0, 2).map((item) => (
+                              <span key={item.engineered_feature} className="tag text-[0.45rem] tracking-widest border-red-500/30 text-red-300">
+                                drag: {item.label}
                               </span>
-                              <div className="text-xs text-dim">
-                                {row.routing?.used_model || scoringData.model_name}
-                                {row.routing?.matched_segment && ` | ${row.routing.matched_segment.dimension}=${row.routing.matched_segment.value}`}
-                              </div>
-                              {row.routing?.reason && (
-                                <div className="text-xs text-dim">
-                                  {row.routing.policy}: {row.routing.reason}
-                                </div>
-                              )}
+                            ))}
+                          </>
+                        )}
+                      </div>
+
+                      {/* Row 3: Rationale + Route details (collapsed) */}
+                      {(row.rationale_summary || row.action_description || row.routing?.reason) && (
+                        <div className="text-xs text-dim leading-relaxed">
+                          {row.rationale_summary || row.action_description || ''}
+                          {row.routing?.used_model && (
+                            <span className="ml-2 text-[0.5rem] text-dim/70">
+                              via {row.routing.used_model}
+                              {row.routing?.matched_segment && ` · ${row.routing.matched_segment.dimension}=${row.routing.matched_segment.value}`}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Route Arbitration (rare, only shown when multiple candidates) */}
+                      {row.routing?.candidates_considered?.length > 1 && (
+                        <div className="mt-2 border border-line p-2 bg-black/60 text-xs">
+                          <div className="font-mono text-[0.5rem] tracking-[0.16em] uppercase text-accent mb-1">Route Arbitration</div>
+                          {row.routing.candidates_considered.slice(0, 3).map((candidate) => (
+                            <div key={candidate.model_name} className="text-dim">
+                              {candidate.model_name} | priority {candidate.priority_score.toFixed(2)} | rows {candidate.feedback_rows} | auc {candidate.roc_auc.toFixed(2)}
                             </div>
-                          </td>
-                          <td className="py-4 px-6">
-                            <div className="flex flex-wrap gap-2">
-                              {row.top_drivers.map((drv, idx) => (
-                                <span key={idx} className="tag text-[0.5rem] tracking-widest">{drv}</span>
-                              ))}
-                            </div>
-                          </td>
-                          <td className="py-4 px-6">
-                            <div className="space-y-3">
-                              <p className="text-sm text-light leading-relaxed">{row.rationale_summary || 'No rationale available for this model version.'}</p>
-                              {row.rationale?.top_negative?.length > 0 && (
-                                <div className="flex flex-wrap gap-2">
-                                  {row.rationale.top_negative.slice(0, 2).map((item) => (
-                                    <span key={item.engineered_feature} className="tag text-[0.5rem] tracking-widest border-red-500/30 text-red-300">
-                                      drag: {item.label}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                              {row.routing?.candidates_considered?.length > 1 && (
-                                <div className="border border-line p-3 bg-black/60">
-                                  <div className="font-mono text-[0.5rem] tracking-[0.16em] uppercase text-accent mb-2">Route Arbitration</div>
-                                  <div className="space-y-2">
-                                    {row.routing.candidates_considered.slice(0, 3).map((candidate) => (
-                                      <div key={candidate.model_name} className="text-xs text-dim">
-                                        {candidate.model_name} | priority {candidate.priority_score.toFixed(2)} | rows {candidate.feedback_rows} | auc {candidate.roc_auc.toFixed(2)}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    );
+                  })}
                 </div>
+
+                {/* Pagination Bottom Bar */}
+                {totalPages > 1 && (
+                  <div className="bg-black/60 border-t border-line px-6 py-4 flex justify-between items-center flex-wrap gap-3">
+                    <div className="font-mono text-[0.55rem] tracking-[0.15em] text-dim uppercase">
+                      Showing {startIdx + 1}–{endIdx} of {totalFiltered} leads · Page {safePage} of {totalPages}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => { setCurrentPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                        disabled={safePage <= 1}
+                        className={`font-mono text-[0.55rem] tracking-[0.12em] uppercase px-3 py-1.5 border transition-colors ${safePage <= 1 ? 'border-line/30 text-dim/30 cursor-not-allowed' : 'border-line text-dim hover:text-white hover:border-white'}`}
+                      >
+                        First
+                      </button>
+                      <button
+                        onClick={() => { setCurrentPage(p => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                        disabled={safePage <= 1}
+                        className={`font-mono text-[0.55rem] tracking-[0.12em] uppercase px-4 py-1.5 border transition-colors ${safePage <= 1 ? 'border-line/30 text-dim/30 cursor-not-allowed' : 'border-line text-dim hover:text-white hover:border-white'}`}
+                      >
+                        ← Previous
+                      </button>
+                      <span className="font-mono text-[0.6rem] tracking-[0.1em] text-accent px-3">
+                        Page {safePage} of {totalPages}
+                      </span>
+                      <button
+                        onClick={() => { setCurrentPage(p => Math.min(totalPages, p + 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                        disabled={safePage >= totalPages}
+                        className={`font-mono text-[0.55rem] tracking-[0.12em] uppercase px-4 py-1.5 border transition-colors ${safePage >= totalPages ? 'border-line/30 text-dim/30 cursor-not-allowed' : 'border-accent text-accent hover:bg-accent/10'}`}
+                      >
+                        Next →
+                      </button>
+                      <button
+                        onClick={() => { setCurrentPage(totalPages); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                        disabled={safePage >= totalPages}
+                        className={`font-mono text-[0.55rem] tracking-[0.12em] uppercase px-3 py-1.5 border transition-colors ${safePage >= totalPages ? 'border-line/30 text-dim/30 cursor-not-allowed' : 'border-line text-dim hover:text-white hover:border-white'}`}
+                      >
+                        Last
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
               );
             })()}
@@ -1059,8 +1068,8 @@ export default function Dashboard() {
         {activeTab === 'feedback' && (
           <section className="fade-in space-y-8">
             <div className="glass-card p-8 border border-line bg-surface/30">
-              <h3 className="font-serif text-2xl font-light mb-2">Ingest Real Outcomes</h3>
-              <p className="text-dim text-sm mb-6 font-light">Upload a CSV containing the same lead fields used during scoring plus a binary outcome column. Lucida will match prior scored leads and produce a learning signal.</p>
+              <h3 className="font-serif text-2xl font-light mb-2">Submit Outcome Data</h3>
+              <p className="text-dim text-sm mb-6 font-light">Upload a CSV containing the same lead fields used during scoring plus a binary outcome column. Lucida will match previously scored leads and improve future predictions.</p>
 
               <div
                 onDragOver={(e) => { e.preventDefault(); setIsHovering(true); }}
@@ -1126,7 +1135,7 @@ export default function Dashboard() {
               />
 
               <button onClick={executePipeline} disabled={actionLoading || files.length === 0} className="btn-primary w-full flex justify-center items-center py-4 text-sm tracking-widest">
-                {actionLoading ? <Loader className="w-5 h-5 animate-spin" /> : 'INGEST FEEDBACK SIGNAL'}
+                {actionLoading ? <Loader className="w-5 h-5 animate-spin" /> : 'SUBMIT FEEDBACK'}
               </button>
             </div>
 
@@ -1247,7 +1256,7 @@ export default function Dashboard() {
                         label="Retraining Model from Feedback"
                         estimatedTime={estimatedTime}
                       />
-                      <button onClick={handleRetrainFromFeedback} disabled={actionLoading} className="btn-primary w-full flex justify-center items-center py-4 text-sm tracking-widest">
+                      <button onClick={() => { if (user?.tier !== 'pro') { setShowUpgradeModal(true); return; } handleRetrainFromFeedback(); }} disabled={actionLoading} className="btn-primary w-full flex justify-center items-center py-4 text-sm tracking-widest">
                         {actionLoading ? <Loader className="w-5 h-5 animate-spin" /> : 'RETRAIN FROM FEEDBACK'}
                       </button>
                     </div>
@@ -1356,7 +1365,7 @@ export default function Dashboard() {
                           </span>
                           {item.segment_readiness !== 'stable' && (
                             <button
-                              onClick={() => handleSegmentRetrain(item.dimension, item.segment)}
+                              onClick={() => { if (user?.tier !== 'pro') { setShowUpgradeModal(true); return; } handleSegmentRetrain(item.dimension, item.segment); }}
                               disabled={actionLoading}
                               className="btn-outline px-4 py-2 text-[0.55rem]"
                             >
@@ -1483,6 +1492,48 @@ export default function Dashboard() {
           </section>
         )}
       </main>
+      
+      <UpgradeModal isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} />
+
+        {/* ── Cancel Plan Modal ── */}
+        {showCancelModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => !actionLoading && setShowCancelModal(false)}></div>
+            <div className="relative bg-surface border border-line p-8 max-w-md w-full shadow-2xl">
+              <button 
+                onClick={() => setShowCancelModal(false)} 
+                disabled={actionLoading}
+                className="absolute top-4 right-4 text-dim hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              
+              <h2 className="text-2xl font-serif text-white mb-4">Cancel Subscription?</h2>
+              <p className="text-sm text-dim leading-relaxed mb-6">
+                Are you sure you want to cancel your Premium subscription? 
+                <br /><br />
+                As per our Refund & Cancellation Policy, this will stop all <strong>future</strong> billing. You will continue to have access to Premium features until the end of your current billing cycle.
+              </p>
+              
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => setShowCancelModal(false)} 
+                  disabled={actionLoading}
+                  className="flex-1 px-4 py-3 border border-line text-sm font-mono tracking-widest text-light hover:text-white hover:border-white transition-colors uppercase"
+                >
+                  Keep Plan
+                </button>
+                <button 
+                  onClick={handleCancelSubscription} 
+                  disabled={actionLoading}
+                  className="flex-1 px-4 py-3 bg-red-500/10 border border-red-500/50 text-red-400 hover:bg-red-500/20 text-sm font-mono tracking-widest uppercase transition-colors flex justify-center items-center"
+                >
+                  {actionLoading ? <Loader className="w-4 h-4 animate-spin" /> : "Confirm Cancel"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
     </div>
   );
 }

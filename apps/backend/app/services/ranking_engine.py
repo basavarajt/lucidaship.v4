@@ -690,9 +690,10 @@ class RankingEngine:
         Returns:
             RankingResult with complete ranking information
         """
-        # Step 1: Extract signals
-        self.extractor = SignalExtractor(self.df)
-        self.signal_matrix, self.signal_info = self.extractor.extract_all()
+        # Step 1: Extract signals unless precomputed by a higher-level service.
+        if self.signal_matrix is None or self.signal_info is None:
+            self.extractor = SignalExtractor(self.df)
+            self.signal_matrix, self.signal_info = self.extractor.extract_all()
         
         # Step 2: TOPSIS scoring
         topsis_ranker = TopsisRanker(self.signal_matrix)

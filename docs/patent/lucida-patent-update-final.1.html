@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lucida Patent Update Final.1</title>
+  <style>
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      line-height: 1.55;
+      color: #1f2937;
+      margin: 0;
+      background: #f5f7fb;
+    }
+    .page {
+      max-width: 980px;
+      margin: 0 auto;
+      background: #ffffff;
+      padding: 48px 56px 64px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+    }
+    h1, h2, h3 {
+      color: #0f172a;
+      margin-top: 28px;
+    }
+    h1 {
+      font-size: 2rem;
+      border-bottom: 3px solid #0f766e;
+      padding-bottom: 12px;
+      margin-top: 0;
+    }
+    h2 {
+      font-size: 1.35rem;
+      border-left: 6px solid #0f766e;
+      padding-left: 12px;
+    }
+    h3 {
+      font-size: 1.05rem;
+    }
+    p, li {
+      font-size: 0.98rem;
+    }
+    ul, ol {
+      margin-top: 8px;
+      padding-left: 24px;
+    }
+    .meta {
+      background: #ecfeff;
+      border: 1px solid #a5f3fc;
+      padding: 14px 16px;
+      border-radius: 10px;
+      margin: 18px 0 24px;
+    }
+    .callout {
+      background: #f8fafc;
+      border-left: 5px solid #2563eb;
+      padding: 14px 16px;
+      margin: 16px 0;
+    }
+    code {
+      background: #f1f5f9;
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-family: Consolas, monospace;
+      font-size: 0.92em;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #dbe2ea;
+      margin: 28px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>Lucida Patent Update Final.1</h1>
+    <div class="meta">
+      <strong>Date:</strong> 2026-04-28<br />
+      <strong>Scope:</strong> Latest implemented backend changes after the existing patent package in <code>docs/patent/lucida-enhanced-patent-claims.html</code><br />
+      <strong>Purpose:</strong> Identify the newest claim-worthy mechanisms that were added after the current patent write-up, and list the updates that should now be reflected in the patent materials.<br />
+      <strong>Note:</strong> This is product and implementation drafting support only, not legal advice.
+    </div>
+
+    <h2>1. Latest Change Audit</h2>
+    <h3>Latest change found in the current patent HTML file</h3>
+    <ul>
+      <li>File reviewed: <code>docs/patent/lucida-enhanced-patent-claims.html</code></li>
+      <li>Latest git history affecting that file:
+        <ul>
+          <li><code>d50d7ab feat: Add comprehensive patent claims, async training, merge governance, and optimization systems</code></li>
+        </ul>
+      </li>
+      <li>Result:
+        <ul>
+          <li>The patent HTML itself does not show a newer revision after that baseline commit.</li>
+          <li>The real delta is in the newer backend architecture work that has not yet been folded into the patent documents.</li>
+        </ul>
+      </li>
+    </ul>
+
+    <h3>Prior patent-alignment memo already captured</h3>
+    <p>The existing file <code>changes_patent_alignment_2026-04-17.txt</code> already identified two missing mechanisms after the older patent package:</p>
+    <ul>
+      <li>Schema compatibility preprocessing</li>
+      <li>Unsupervised ranking engine using TOPSIS, AHP, and confidence intervals</li>
+    </ul>
+    <p>Those remain useful claim themes and should continue to stay in scope.</p>
+
+    <h2>2. New Changes Implemented After the Current Patent Package</h2>
+    <ol>
+      <li>Business-aware weighting layer for lead scoring</li>
+      <li>Adaptive feedback loop that updates business-priority weights over time</li>
+      <li>Deterministic explanation engine with structured factor-impact output</li>
+      <li>Versioned REST scoring interface around score, explain, feedback, dataset upload, and signals</li>
+      <li>Relational scoring evidence model across leads, scores, signals, models, and feedback</li>
+      <li>Reusable signal extraction and caching to avoid repeated scoring computation</li>
+    </ol>
+
+    <h2>3. Changes That Now Need To Be Made To The Patent Package</h2>
+    <h3>A. Update the patent materials to include business-aware weighting</h3>
+    <p>The current patent write-up does not explicitly claim a mechanism that applies configurable business-priority bias to technical scoring signals.</p>
+    <div class="callout">
+      Add a claim family for priority-feature boosting tied to <code>job_title</code>, <code>company_size</code>, and <code>recent_activity</code>, including configurable weights and application to signal matrices before ranking or final score generation.
+    </div>
+
+    <h3>B. Update the patent materials to include adaptive weight learning</h3>
+    <p>Existing materials discuss feedback loops and segment retraining, but not a lightweight feedback mechanism that updates feature-priority weights without full retraining.</p>
+
+    <h3>C. Update the patent materials to include deterministic explanation synthesis</h3>
+    <p>The new backend now has a dedicated explanation engine that converts internal rationale into structured user-facing explanations.</p>
+
+    <h3>D. Update the patent materials to include persisted scoring evidence graph</h3>
+    <p>The new relational model ties together leads, scores, signals, feedback, and model configuration in a unified evidence structure.</p>
+
+    <h3>E. Update the patent materials to include signal reuse and scoring cache</h3>
+    <p>The current package talks about optimization in dataset analysis, but not about caching signal extraction and reusing weighted signal matrices during scoring.</p>
+
+    <h2>4. New List of Patentable Things</h2>
+    <p>Below is the updated list of the strongest current patentable mechanisms, including both the earlier patent package and the newly implemented additions.</p>
+
+    <h3>Highest-priority claim families</h3>
+    <ol>
+      <li>Score-time routing arbitration with transparent routing ledger</li>
+      <li>Feedback signature matching and segment-aware retraining</li>
+      <li>Schema compatibility preprocessing for scoring-time repair</li>
+      <li>Unsupervised ranking engine using signal extraction, TOPSIS, AHP, and confidence intervals</li>
+      <li>Business-aware signal weighting layer</li>
+      <li>Adaptive feedback-driven weight tuning without full retraining</li>
+      <li>Deterministic explanation engine for factor-impact scoring output</li>
+    </ol>
+
+    <h3>Medium-priority claim families</h3>
+    <ol>
+      <li>Dataset merge governance with join confidence and cardinality safety</li>
+      <li>Upload quantization with distortion guardrails</li>
+      <li>Version-aware rank movement telemetry</li>
+      <li>Persisted relational scoring evidence graph across leads, signals, scores, models, and feedback</li>
+      <li>Shared score/explain caching with signal reuse</li>
+      <li>Target auto-detection and preprocessing intelligence</li>
+      <li>Performance fast-paths for large-scale preprocessing and relationship analysis</li>
+    </ol>
+
+    <h2>5. Recommended New Claim Packages To Add</h2>
+    <h3>Package P8 - Business-Aware Weighted Scoring</h3>
+    <p>A computer-implemented method that extracts signals from input records, identifies a subset of business-priority signal families, applies configurable weight multipliers to those families, and produces a final ranking score using the weighted signal matrix.</p>
+
+    <h3>Package P9 - Adaptive Weight Learning From Feedback</h3>
+    <p>A computer-implemented method that receives outcome feedback, retrieves stored signals associated with a previously scored lead, identifies priority-feature participation, adjusts weight values according to outcome polarity, and persists those updated weights for future scoring.</p>
+
+    <h3>Package P10 - Deterministic Explanation Synthesis</h3>
+    <p>A computer-implemented method that converts stored scoring rationale into structured explanation records comprising factor, impact, direction, source field, and narrative detail, including annotations when business-priority weighting altered the result.</p>
+
+    <h3>Package P11 - Scoring Evidence Graph and Signal Reuse</h3>
+    <p>A computer-implemented scoring system that stores linked lead, score, signal, model, and feedback records, and reuses previously extracted or cached signal artifacts across score and explain operations to reduce recomputation while preserving explanation consistency.</p>
+
+    <h2>6. Which New Things Are Strongest For Counsel Review</h2>
+    <ol>
+      <li>Business-aware weighted scoring</li>
+      <li>Adaptive feature-weight learning from real conversion feedback</li>
+      <li>Deterministic explanation generation from scoring rationale</li>
+      <li>Persisted signal-score-feedback graph enabling closed-loop explanation and adaptation</li>
+    </ol>
+
+    <h2>7. Suggested Textual Updates To Existing Patent Docs</h2>
+    <ul>
+      <li>Expand the executive summary to reflect at least 4 additional implemented mechanisms.</li>
+      <li>Add explicit HTML summary coverage for configurable business weighting, feedback-driven weight adaptation, deterministic explanation records, and linked lead-score-signal-feedback persistence.</li>
+      <li>Add four new markdown claims sections with independent claim draft, dependent claim directions, evidence file references, and prosecution notes.</li>
+    </ul>
+
+    <h2>8. Evidence Pointers For The New Update</h2>
+    <ul>
+      <li><code>apps/backend/app/services/business_weights.py</code></li>
+      <li><code>apps/backend/app/services/feedback_learning.py</code></li>
+      <li><code>apps/backend/app/services/explanation_engine.py</code></li>
+      <li><code>apps/backend/app/services/lead_scoring.py</code></li>
+      <li><code>apps/backend/app/models/entities.py</code></li>
+      <li><code>apps/backend/app/models/schemas.py</code></li>
+      <li><code>apps/backend/app/db/session.py</code></li>
+      <li><code>apps/backend/app/api/v1/routes.py</code></li>
+      <li><code>apps/backend/app/services/ranking_engine.py</code></li>
+      <li><code>apps/backend/app/core/config.py</code></li>
+      <li><code>apps/backend/app/database.py</code></li>
+      <li><code>apps/backend/BACKEND_REFACTOR_NOTES.md</code></li>
+    </ul>
+
+    <h2>9. Final Recommendation</h2>
+    <p>The patent package should not be treated as current until it absorbs the post-baseline backend changes. The most important missed additions are not generic API improvements, but rather business-aware weighting of extracted scoring factors, feedback-driven adaptation of those weights, deterministic explanation synthesis, and stored evidence structures linking signals, scores, models, and outcomes.</p>
+
+    <h2>10. Deliverables Created In This Update</h2>
+    <ul>
+      <li><code>docs/patent/lucida-patent-update-final.1.md</code></li>
+      <li><code>docs/patent/lucida-patent-update-final.1.html</code></li>
+      <li><code>docs/patent/lucida-patent-update-final.1.pdf</code> if PDF rendering succeeds on this machine</li>
+    </ul>
+  </div>
+</body>
+</html>

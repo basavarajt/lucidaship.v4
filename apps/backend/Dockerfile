@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 FROM python:3.11-slim
 
 # Security: run as non-root user
-RUN groupadd -r lucida && useradd -r -g lucida lucida
+RUN groupadd -r lucida && useradd -r -g lucida -m lucida
 
 WORKDIR /app
 
@@ -24,8 +24,8 @@ COPY --from=builder /install /usr/local
 # Copy application code
 COPY . .
 
-# Create model artifacts directory
-RUN mkdir -p /app/model_artifacts && chown -R lucida:lucida /app
+# Create model artifacts directory and writable dirs
+RUN mkdir -p /app/model_artifacts /home/lucida/.local && chown -R lucida:lucida /app /home/lucida
 
 USER lucida
 
@@ -33,11 +33,12 @@ USER lucida
 ENV PYTHONUNBUFFERED=1
 ENV ENVIRONMENT=production
 
-EXPOSE 8000
+EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
 
 # Start with Gunicorn + Uvicorn workers
-CMD ["gunicorn", "main:app", "-w", "2", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--timeout", "120"]
+# Single worker to maximize memory for ML scoring operations
+CMD gunicorn main:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8080} --timeout 300
