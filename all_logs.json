@@ -1,0 +1,405 @@
+[
+  {
+    "insertId": "6a11b4ad000f295004bf5b95",
+    "labels": {
+      "instanceId": "0007b734d9b91c7ecec116c9583faa83f5dbfceb26a16032567599af3ee2e4cf4cfd66942ba17e14c20d690c082f3cc8bb114c1b31e2f748f245a6f8d41e012558c547b7e6e359fa425305ad75d9"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:42.095246497Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "[2026-05-23 14:07:41 +0000] [2] [INFO] Control socket listening at /home/lucida/.gunicorn/gunicorn.ctl",
+    "timestamp": "2026-05-23T14:07:41.993616Z"
+  },
+  {
+    "insertId": "6a11b4ad000ee96af9fbab6a",
+    "labels": {
+      "instanceId": "0007b734d9b91c7ecec116c9583faa83f5dbfceb26a16032567599af3ee2e4cf4cfd66942ba17e14c20d690c082f3cc8bb114c1b31e2f748f245a6f8d41e012558c547b7e6e359fa425305ad75d9"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:42.095246497Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "[2026-05-23 14:07:41 +0000] [3] [INFO] Booting worker with pid: 3",
+    "timestamp": "2026-05-23T14:07:41.977258Z"
+  },
+  {
+    "insertId": "6a11b4ad000ead721736c9e4",
+    "labels": {
+      "instanceId": "0007b734d9b91c7ecec116c9583faa83f5dbfceb26a16032567599af3ee2e4cf4cfd66942ba17e14c20d690c082f3cc8bb114c1b31e2f748f245a6f8d41e012558c547b7e6e359fa425305ad75d9"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2026-05-23T14:07:42.033877151Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "textPayload": "Default STARTUP TCP probe succeeded after 1 attempt for container \"lucida-backend-1\" on port 8080.",
+    "timestamp": "2026-05-23T14:07:41.961906Z"
+  },
+  {
+    "insertId": "6a11b4ad000eac0613b2cf6b",
+    "labels": {
+      "instanceId": "0007b734d9b91c7ecec116c9583faa83f5dbfceb26a16032567599af3ee2e4cf4cfd66942ba17e14c20d690c082f3cc8bb114c1b31e2f748f245a6f8d41e012558c547b7e6e359fa425305ad75d9"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:42.095246497Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "[2026-05-23 14:07:41 +0000] [2] [INFO] Using worker: uvicorn.workers.UvicornWorker",
+    "timestamp": "2026-05-23T14:07:41.961542Z"
+  },
+  {
+    "insertId": "6a11b4ad000eabd506cc7e2d",
+    "labels": {
+      "instanceId": "0007b734d9b91c7ecec116c9583faa83f5dbfceb26a16032567599af3ee2e4cf4cfd66942ba17e14c20d690c082f3cc8bb114c1b31e2f748f245a6f8d41e012558c547b7e6e359fa425305ad75d9"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:42.095246497Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "[2026-05-23 14:07:41 +0000] [2] [INFO] Listening at: http://0.0.0.0:8080 (2)",
+    "timestamp": "2026-05-23T14:07:41.961493Z"
+  },
+  {
+    "insertId": "6a11b4ad000ea7a9009502f7",
+    "labels": {
+      "instanceId": "0007b734d9b91c7ecec116c9583faa83f5dbfceb26a16032567599af3ee2e4cf4cfd66942ba17e14c20d690c082f3cc8bb114c1b31e2f748f245a6f8d41e012558c547b7e6e359fa425305ad75d9"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:42.095246497Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "[2026-05-23 14:07:41 +0000] [2] [INFO] Starting gunicorn 25.3.0",
+    "timestamp": "2026-05-23T14:07:41.960425Z"
+  },
+  {
+    "insertId": "6a11b4ac000a90b2a2a83f3a",
+    "labels": {
+      "instanceId": "0007b734d9b91c7ecec116c9583faa83f5dbfceb26a16032567599af3ee2e4cf4cfd66942ba17e14c20d690c082f3cc8bb114c1b31e2f748f245a6f8d41e012558c547b7e6e359fa425305ad75d9",
+      "scaling_reason": "AUTOSCALING"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2026-05-23T14:07:40.701671874Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "textPayload": "Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current traffic.",
+    "timestamp": "2026-05-23T14:07:40.692402Z"
+  },
+  {
+    "insertId": "6a11b4ab000f03a374bf1f8d",
+    "labels": {
+      "instanceId": "0007b734d98772efb7735d73b9888c1935c1f3790cf7cdcd2e286debe1c303e4c9e4a500b7d5ed1a92f0e1b4da7b305c9decf35801abfb22b31dc7e221f31274b5afaf1af92e3fea2e7b81ec5aa7"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:40.095096844Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "[2026-05-23 14:07:39 +0000] [2] [ERROR] Reason: Worker failed to boot.",
+    "timestamp": "2026-05-23T14:07:39.983971Z"
+  },
+  {
+    "insertId": "6a11b4ab000f03962f375f9a",
+    "labels": {
+      "instanceId": "0007b734d98772efb7735d73b9888c1935c1f3790cf7cdcd2e286debe1c303e4c9e4a500b7d5ed1a92f0e1b4da7b305c9decf35801abfb22b31dc7e221f31274b5afaf1af92e3fea2e7b81ec5aa7"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:40.095096844Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "[2026-05-23 14:07:39 +0000] [2] [ERROR] Shutting down: Master",
+    "timestamp": "2026-05-23T14:07:39.983958Z"
+  },
+  {
+    "insertId": "6a11b4ab000ef77340e6eecd",
+    "labels": {
+      "instanceId": "0007b734d98772efb7735d73b9888c1935c1f3790cf7cdcd2e286debe1c303e4c9e4a500b7d5ed1a92f0e1b4da7b305c9decf35801abfb22b31dc7e221f31274b5afaf1af92e3fea2e7b81ec5aa7"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:40.095096844Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "[2026-05-23 14:07:39 +0000] [2] [ERROR] Worker (pid:3) exited with code 3.",
+    "timestamp": "2026-05-23T14:07:39.980851Z"
+  },
+  {
+    "insertId": "6a11b4ab000191a098d2b182",
+    "labels": {
+      "instanceId": "0007b734d98772efb7735d73b9888c1935c1f3790cf7cdcd2e286debe1c303e4c9e4a500b7d5ed1a92f0e1b4da7b305c9decf35801abfb22b31dc7e221f31274b5afaf1af92e3fea2e7b81ec5aa7"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:39.432267559Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "[2026-05-23 14:07:39 +0000] [3] [INFO] Worker exiting (pid: 3)",
+    "timestamp": "2026-05-23T14:07:39.102816Z"
+  },
+  {
+    "insertId": "6a11b4ab00018ddfe69392d7",
+    "labels": {
+      "instanceId": "0007b734d98772efb7735d73b9888c1935c1f3790cf7cdcd2e286debe1c303e4c9e4a500b7d5ed1a92f0e1b4da7b305c9decf35801abfb22b31dc7e221f31274b5afaf1af92e3fea2e7b81ec5aa7"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:39.432267559Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "[2026-05-23 14:07:39 +0000] [3] [ERROR] Application startup failed. Exiting.",
+    "timestamp": "2026-05-23T14:07:39.101855Z"
+  },
+  {
+    "insertId": "6a11b4ab00018ddb2ac9fc9a",
+    "labels": {
+      "instanceId": "0007b734d98772efb7735d73b9888c1935c1f3790cf7cdcd2e286debe1c303e4c9e4a500b7d5ed1a92f0e1b4da7b305c9decf35801abfb22b31dc7e221f31274b5afaf1af92e3fea2e7b81ec5aa7"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:39.432267559Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "AttributeError: 'Settings' object has no attribute 'CLERK_SECRET_KEY'",
+    "timestamp": "2026-05-23T14:07:39.101851Z"
+  },
+  {
+    "insertId": "6a11b4ab00018dd1f3daebb8",
+    "labels": {
+      "instanceId": "0007b734d98772efb7735d73b9888c1935c1f3790cf7cdcd2e286debe1c303e4c9e4a500b7d5ed1a92f0e1b4da7b305c9decf35801abfb22b31dc7e221f31274b5afaf1af92e3fea2e7b81ec5aa7"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:39.432267559Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')",
+    "timestamp": "2026-05-23T14:07:39.101841Z"
+  },
+  {
+    "insertId": "6a11b4ab00018dcb1cd17574",
+    "labels": {
+      "instanceId": "0007b734d98772efb7735d73b9888c1935c1f3790cf7cdcd2e286debe1c303e4c9e4a500b7d5ed1a92f0e1b4da7b305c9decf35801abfb22b31dc7e221f31274b5afaf1af92e3fea2e7b81ec5aa7"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:39.432267559Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  File \"/usr/local/lib/python3.11/site-packages/pydantic/main.py\", line 892, in __getattr__",
+    "timestamp": "2026-05-23T14:07:39.101835Z"
+  },
+  {
+    "insertId": "6a11b4ab00018dc99aaca934",
+    "labels": {
+      "instanceId": "0007b734d98772efb7735d73b9888c1935c1f3790cf7cdcd2e286debe1c303e4c9e4a500b7d5ed1a92f0e1b4da7b305c9decf35801abfb22b31dc7e221f31274b5afaf1af92e3fea2e7b81ec5aa7"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:39.432267559Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "           ^^^^^^^^^^^^^^^^^^^^^^^^^",
+    "timestamp": "2026-05-23T14:07:39.101833Z"
+  },
+  {
+    "insertId": "6a11b4ab00018dc67f945f5d",
+    "labels": {
+      "instanceId": "0007b734d98772efb7735d73b9888c1935c1f3790cf7cdcd2e286debe1c303e4c9e4a500b7d5ed1a92f0e1b4da7b305c9decf35801abfb22b31dc7e221f31274b5afaf1af92e3fea2e7b81ec5aa7"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:39.432267559Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "    if not settings.CLERK_SECRET_KEY:",
+    "timestamp": "2026-05-23T14:07:39.101830Z"
+  },
+  {
+    "insertId": "6a11b4ab00018dc33d02cc8a",
+    "labels": {
+      "instanceId": "0007b734d98772efb7735d73b9888c1935c1f3790cf7cdcd2e286debe1c303e4c9e4a500b7d5ed1a92f0e1b4da7b305c9decf35801abfb22b31dc7e221f31274b5afaf1af92e3fea2e7b81ec5aa7"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:39.432267559Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  File \"/app/main.py\", line 39, in validate_runtime_settings",
+    "timestamp": "2026-05-23T14:07:39.101827Z"
+  },
+  {
+    "insertId": "6a11b4ab00018dc00fb3b903",
+    "labels": {
+      "instanceId": "0007b734d98772efb7735d73b9888c1935c1f3790cf7cdcd2e286debe1c303e4c9e4a500b7d5ed1a92f0e1b4da7b305c9decf35801abfb22b31dc7e221f31274b5afaf1af92e3fea2e7b81ec5aa7"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:39.432267559Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "    validate_runtime_settings()",
+    "timestamp": "2026-05-23T14:07:39.101824Z"
+  },
+  {
+    "insertId": "6a11b4ab00018dbd44a1725a",
+    "labels": {
+      "instanceId": "0007b734d98772efb7735d73b9888c1935c1f3790cf7cdcd2e286debe1c303e4c9e4a500b7d5ed1a92f0e1b4da7b305c9decf35801abfb22b31dc7e221f31274b5afaf1af92e3fea2e7b81ec5aa7"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-05-23T14:07:39.432267559Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00022-qpb",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  File \"/app/main.py\", line 82, in lifespan",
+    "timestamp": "2026-05-23T14:07:39.101821Z"
+  }
+]

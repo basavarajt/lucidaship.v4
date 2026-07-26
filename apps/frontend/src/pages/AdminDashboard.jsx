@@ -8,6 +8,7 @@ import ContactManager from '../components/admin/ContactManager';
 import AudienceManager from '../components/admin/AudienceManager';
 import CampaignBuilder from '../components/admin/CampaignBuilder';
 import AnalyticsDashboard from '../components/admin/AnalyticsDashboard';
+import NewsletterManager from '../components/admin/NewsletterManager';
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState('analytics');
@@ -44,6 +45,7 @@ export default function AdminDashboard() {
     { id: 'contacts', label: 'Contacts', icon: Users },
     { id: 'audiences', label: 'Audiences', icon: LayoutDashboard },
     { id: 'campaigns', label: 'Campaigns', icon: Mail },
+    { id: 'newsletters', label: 'Newsletters', icon: Mail },
   ];
 
   if (loading) {
@@ -162,6 +164,7 @@ export default function AdminDashboard() {
           {activeTab === 'contacts' && <ContactManager />}
           {activeTab === 'audiences' && <AudienceManager />}
           {activeTab === 'campaigns' && <CampaignBuilder />}
+          {activeTab === 'newsletters' && <NewsletterManager />}
         </main>
       </div>
     </div>

@@ -82,7 +82,7 @@ VITE_MASTER_KEY=change-me
 **File:** `/apps/backend/.env`
 ```
 ENVIRONMENT=development
-TURSO_DATABASE_URL=  (empty for SQLite)
+DATABASE_URL=  (empty for SQLite; set to your managed SQL connection string in production)
 CLERK_SECRET_KEY=    (empty for dev)
 CORS_ORIGINS=http://localhost:5173,http://localhost:3000
 MODEL_ARTIFACTS_DIR=./model_artifacts

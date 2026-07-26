@@ -191,7 +191,6 @@ async def add_security_headers(request: Request, call_next):
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
 
-
 # ── Include Routers ──────────────────────────────────────────
 
 from app.api.auth import router as auth_router
@@ -199,19 +198,20 @@ from app.api.scoring import router as scoring_router
 from app.api.models_api import router as models_router
 from app.api.founding_members import router as founding_members_router
 from app.api.resend_admin import router as resend_admin_router
+from app.api.campaign_links import router as campaign_links_router
 
 app.include_router(auth_router)
 app.include_router(scoring_router)
 app.include_router(models_router)
 app.include_router(founding_members_router)
 app.include_router(resend_admin_router)
+app.include_router(campaign_links_router)
 
 
 # ── Health Check (no auth required) ─────────────────────────
 
 @app.get("/health", tags=["System"])
 def health_check():
-    """Health check for Railway / Docker / load balancers."""
     # Check database connectivity
     db_ok = check_db_connectivity()
 

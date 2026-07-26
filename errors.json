@@ -1,0 +1,312 @@
+[
+  {
+    "httpRequest": {
+      "latency": "8.255692830s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://lucidaanalytics.tech/",
+      "remoteIp": "2401:4900:c082:c5ce:681f:13fa:23bc:abc7",
+      "requestMethod": "OPTIONS",
+      "requestSize": "779",
+      "requestUrl": "https://lucida-backend-201742003125.us-central1.run.app/train?model_name=Ensemble-01&mode=supervised",
+      "responseSize": "67",
+      "serverIp": "2600:1900:4240:200::",
+      "status": 503,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+    },
+    "insertId": "6a11adb5000dc56bf273274a",
+    "labels": {
+      "instanceId": "0007b734d9d853feb59c3109b361f2428a019fd16efe3c75e97b43b019009dcdfa84763151b5c8fe0c48b991f880b3e8d974a1965e1c0e7496ff06762ed713a4442a61f01c4d16c58b564c945f0f"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-05-23T13:37:57.909131898Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00019-f9j",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "spanId": "a7e0152465a429ce",
+    "textPayload": "The request failed because either the HTTP response was malformed or connection to the instance had an error. Additional troubleshooting documentation can be found at: https://cloud.google.com/run/docs/troubleshooting#malformed-response-or-connection-error",
+    "timestamp": "2026-05-23T13:37:49.644483Z",
+    "trace": "projects/lucidaanalytics-d28e1/traces/2c8059ef447d43ed31aaaad62dd51fe8",
+    "traceSampled": true
+  },
+  {
+    "httpRequest": {
+      "latency": "11.851307510s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://lucidaanalytics.tech/",
+      "remoteIp": "2401:4900:c082:c5ce:681f:13fa:23bc:abc7",
+      "requestMethod": "OPTIONS",
+      "requestSize": "779",
+      "requestUrl": "https://lucida-backend-201742003125.us-central1.run.app/train?model_name=Ensemble-01&mode=supervised",
+      "responseSize": "67",
+      "serverIp": "2600:1900:4240:200::",
+      "status": 503,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+    },
+    "insertId": "6a11ad9f000e865dc93be4b5",
+    "labels": {
+      "instanceId": "0007b734d9c7ecc7f2e17dbb0662dc62420aab4f55171cd2f9d35bbba43ea708ef39aca10fc71af51fd28f6ef0b1f4d5f64a1810ea28bb0efc8f242d4c201b1b1b3ab4cbad5754f5ff98b52a2ffa"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-05-23T13:37:35.956916136Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00019-f9j",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "spanId": "b8e9b8e242466658",
+    "textPayload": "The request failed because either the HTTP response was malformed or connection to the instance had an error. Additional troubleshooting documentation can be found at: https://cloud.google.com/run/docs/troubleshooting#malformed-response-or-connection-error",
+    "timestamp": "2026-05-23T13:37:24.090738Z",
+    "trace": "projects/lucidaanalytics-d28e1/traces/689c2753d42f8fc299e607cb104e7603",
+    "traceSampled": true
+  },
+  {
+    "httpRequest": {
+      "latency": "17.501813505s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://lucidaanalytics.tech/",
+      "remoteIp": "2401:4900:c082:c5ce:681f:13fa:23bc:abc7",
+      "requestMethod": "POST",
+      "requestSize": "2371136",
+      "requestUrl": "https://lucida-backend-201742003125.us-central1.run.app/score-csv?model_name=Ensemble-01&auto_select_model=false",
+      "serverIp": "2600:1900:4240:200::",
+      "status": 500,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+    },
+    "insertId": "6a11aaa3000f3353edb1712d",
+    "labels": {
+      "instanceId": "0007b734d9d875b65f8e50b72c79d81b00fca06667eb28b9a1d9627a2dbddba6eb3b9c6fff87cb55d6b05f97d079fbf864af58ef2025722a78e62f323cab2eaf5c8fe891ab403c1edf1f4fa93de824"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-05-23T13:24:52.003203410Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00018-dk5",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "spanId": "02faaf6a32904c25",
+    "timestamp": "2026-05-23T13:24:34.486214Z",
+    "trace": "projects/lucidaanalytics-d28e1/traces/5417ae1be414733e498922443faea020",
+    "traceSampled": true
+  },
+  {
+    "httpRequest": {
+      "latency": "13.457667635s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://lucidaanalytics.tech/",
+      "remoteIp": "2401:4900:c082:c5ce:681f:13fa:23bc:abc7",
+      "requestMethod": "POST",
+      "requestSize": "2371136",
+      "requestUrl": "https://lucida-backend-201742003125.us-central1.run.app/score-csv?model_name=Ensemble-01&auto_select_model=false",
+      "serverIp": "2600:1900:4240:200::",
+      "status": 500,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+    },
+    "insertId": "6a11a6700004ce8edb1aa4d1",
+    "labels": {
+      "instanceId": "0007b734d98209d3dc153236de084aa934cf240c05220dd26aaeb79bdee7c2f8a3fbfae75d3dd384d6f8319fe38453c03e0679f5cd5a20b35467c028ada79352632e34927dedf4d8a13ebabc76f894"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-05-23T13:06:56.319970455Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00017-487",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "spanId": "5347592a4b19fc3b",
+    "timestamp": "2026-05-23T13:06:42.850239Z",
+    "trace": "projects/lucidaanalytics-d28e1/traces/fcb11f12751fb7c9a274253425788a6e"
+  },
+  {
+    "httpRequest": {
+      "latency": "19.359770017s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://lucidaanalytics.tech/",
+      "remoteIp": "2401:4900:c082:c5ce:681f:13fa:23bc:abc7",
+      "requestMethod": "POST",
+      "requestSize": "2371136",
+      "requestUrl": "https://lucida-backend-201742003125.us-central1.run.app/score-csv?model_name=Ensemble-01&auto_select_model=false",
+      "serverIp": "2600:1900:4242:200::",
+      "status": 500,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+    },
+    "insertId": "6a11a0a7000654bd42eae196",
+    "labels": {
+      "instanceId": "0007b734d9752613b906f707a1cca51d5865254d68db5b4994ec0cf5775942fb1a066ed2b7d45869604b02fff896e10d0c132ba422864a17eccb0ff7ae7891bedde2a15215faf510b22bafbd6ac2"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-05-23T12:42:15.422166906Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00015-cvk",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "spanId": "a35c38a809262c1b",
+    "timestamp": "2026-05-23T12:41:56.047870Z",
+    "trace": "projects/lucidaanalytics-d28e1/traces/847d3097898ae40204ee8f4e4d72978f",
+    "traceSampled": true
+  },
+  {
+    "httpRequest": {
+      "latency": "11.736474531s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://lucidaanalytics.tech/",
+      "remoteIp": "2401:4900:c082:c5ce:681f:13fa:23bc:abc7",
+      "requestMethod": "POST",
+      "requestSize": "2371162",
+      "requestUrl": "https://lucida-backend-201742003125.us-central1.run.app/score-csv?model_name=Ensemble-01&auto_select_model=false",
+      "serverIp": "2600:1900:4241:200::",
+      "status": 500,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+    },
+    "insertId": "6a119ca200074de5baa8e197",
+    "labels": {
+      "instanceId": "0007b734d9749a65cd507e8bcc2b8ef032ac45b9d2b4969a965c455a76c3b4205479c20272ffee4a60c8f014b0dd6b301f633e9290a1bdc9b9817a5976d47887cd5acf5f7917775114c9f494c52b7c"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-05-23T12:25:06.488721050Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00014-s8l",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "spanId": "f4ced18a1538feb6",
+    "timestamp": "2026-05-23T12:24:54.731153Z",
+    "trace": "projects/lucidaanalytics-d28e1/traces/cca1a7e06009a4b3d3d549a30404f281"
+  },
+  {
+    "errorGroups": [
+      {
+        "id": "CKnV1_TJwMrDQw"
+      }
+    ],
+    "insertId": "6a118c43000cd3e0b1257d9f",
+    "labels": {
+      "instanceId": "0007b734d90b3348591d1fb8feef237b66b5cf670ee2227d9c8afebe6d915f5180f6a9dc886b201433e56c86a47fb7980a80330c3dadb4dda70a2539d3c600707ba2e72f385ffdae7a88cd60206206"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2026-05-23T11:15:15.846359543Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00012-mtn",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "textPayload": "Memory limit of 1024 MiB exceeded with 1051 MiB used. Consider increasing the memory limit, see https://cloud.google.com/run/docs/configuring/memory-limits",
+    "timestamp": "2026-05-23T11:15:15.840672Z"
+  },
+  {
+    "httpRequest": {
+      "latency": "30.023566943s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://lucidaanalytics-d28e1.web.app/",
+      "remoteIp": "2401:4900:c082:c5ce:681f:13fa:23bc:abc7",
+      "requestMethod": "POST",
+      "requestSize": "2371153",
+      "requestUrl": "https://lucida-backend-201742003125.us-central1.run.app/score-csv?model_name=Ensemble-01&auto_select_model=true",
+      "responseSize": "67",
+      "serverIp": "2600:1900:4243:200::",
+      "status": 503,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+    },
+    "insertId": "6a118c43000dc35812d59912",
+    "labels": {
+      "instanceId": "0007b734d90b3348591d1fb8feef237b66b5cf670ee2227d9c8afebe6d915f5180f6a9dc886b201433e56c86a47fb7980a80330c3dadb4dda70a2539d3c600707ba2e72f385ffdae7a88cd60206206"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-05-23T11:15:15.908665607Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00012-mtn",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "spanId": "856cbf05f8ead7eb",
+    "textPayload": "The request failed because either the HTTP response was malformed or connection to the instance had an error. Additional troubleshooting documentation can be found at: https://cloud.google.com/run/docs/troubleshooting#malformed-response-or-connection-error\nWhile handling this request, the container instance was found to be using too much memory and was terminated. This is likely to cause a new container instance to be used for the next request to this revision. If you see this message frequently, you may have a memory leak in your code or may need more memory. Consider creating a new revision with more memory.",
+    "timestamp": "2026-05-23T11:14:45.862806Z",
+    "trace": "projects/lucidaanalytics-d28e1/traces/91e54c803e609f8e2e97d5cb549bcca8",
+    "traceSampled": true
+  },
+  {
+    "httpRequest": {
+      "latency": "21.106634516s",
+      "protocol": "HTTP/1.1",
+      "referer": "https://lucidaanalytics.tech/",
+      "remoteIp": "2401:4900:c082:c5ce:681f:13fa:23bc:abc7",
+      "requestMethod": "POST",
+      "requestSize": "2371135",
+      "requestUrl": "https://lucida-backend-201742003125.us-central1.run.app/score-csv?model_name=Ensemble-01&auto_select_model=true",
+      "serverIp": "2600:1900:4240:200::",
+      "status": 500,
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+    },
+    "insertId": "6a118ba9000cee6407f2e57c",
+    "labels": {
+      "instanceId": "0007b734d90b3348591d1fb8feef237b66b5cf670ee2227d9c8afebe6d915f5180f6a9dc886b201433e56c86a47fb7980a80330c3dadb4dda70a2539d3c600707ba2e72f385ffdae7a88cd60206206"
+    },
+    "logName": "projects/lucidaanalytics-d28e1/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-05-23T11:12:41.854131993Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "lucida-backend",
+        "location": "us-central1",
+        "project_id": "lucidaanalytics-d28e1",
+        "revision_name": "lucida-backend-00012-mtn",
+        "service_name": "lucida-backend"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "spanId": "6a4755c25ee77d54",
+    "timestamp": "2026-05-23T11:12:20.725137Z",
+    "trace": "projects/lucidaanalytics-d28e1/traces/cdc353ea264c5a2eed586505140e90c5",
+    "traceSampled": true
+  }
+]

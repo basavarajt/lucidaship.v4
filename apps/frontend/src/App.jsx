@@ -12,6 +12,7 @@ import RefundPolicy from './pages/RefundPolicy';
 import ContactPage from './pages/ContactPage';
 import FoundingMembersSignup from './pages/FoundingMembersSignup';
 import AdminDashboard from './pages/AdminDashboard';
+import CampaignSignupPage from './pages/CampaignSignupPage';
 
 function App() {
   return (
@@ -30,6 +31,7 @@ function App() {
           <Route path="/founding-members" element={<FoundingMembersSignup />} />
           <Route path="/admin/dashboard" element={<AdminDashboard />} />
           <Route path="/admin/founding-members" element={<Navigate to="/admin/dashboard" />} />
+          <Route path="/campaigns/*" element={<CampaignSignupPage />} />
           <Route path="/dashboard/*" element={<Dashboard />} />
         </Routes>
       </div>

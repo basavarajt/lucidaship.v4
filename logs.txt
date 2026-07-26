@@ -1,0 +1,82 @@
+2026-05-23 12:24:14 [2026-05-23 12:24:14 +0000] [3] [INFO] Application startup complete.
+2026-05-23 12:24:14 
+2026-05-23 12:24:15 GET 200 https://lucida-backend-201742003125.us-central1.run.app/auth/me
+2026-05-23 12:24:15 
+2026-05-23 12:24:15 
+2026-05-23 12:24:24 OPTIONS 200 https://lucida-backend-201742003125.us-central1.run.app/train?model_name=Ensemble-01&mode=supervised
+2026-05-23 12:24:24 
+2026-05-23 12:24:29 POST 200 https://lucida-backend-201742003125.us-central1.run.app/train?model_name=Ensemble-01&mode=supervised
+2026-05-23 12:24:29 
+2026-05-23 12:24:29 
+2026-05-23 12:24:34 
+2026-05-23 12:24:35 
+2026-05-23 12:24:35 
+2026-05-23 12:24:35 
+2026-05-23 12:24:39 OPTIONS 200 https://lucida-backend-201742003125.us-central1.run.app/models
+2026-05-23 12:24:39 
+2026-05-23 12:24:40 GET 200 https://lucida-backend-201742003125.us-central1.run.app/models
+2026-05-23 12:24:40 
+2026-05-23 12:24:50 OPTIONS 200 https://lucida-backend-201742003125.us-central1.run.app/score-csv?model_name=Ensemble-01&auto_select_model=false
+2026-05-23 12:24:50 
+2026-05-23 12:24:54 POST 500 https://lucida-backend-201742003125.us-central1.run.app/score-csv?model_name=Ensemble-01&auto_select_model=false
+2026-05-23 12:25:03 
+2026-05-23 12:25:06 
+2026-05-23 12:32:58 [2026-05-23 12:32:58 +0000] [2] [INFO] Starting gunicorn 25.3.0
+2026-05-23 12:32:58 [2026-05-23 12:32:58 +0000] [2] [INFO] Listening at: http://0.0.0.0:8080 (2)
+2026-05-23 12:32:58 [2026-05-23 12:32:58 +0000] [2] [INFO] Using worker: uvicorn.workers.UvicornWorker
+2026-05-23 12:32:58 [2026-05-23 12:32:58 +0000] [3] [INFO] Booting worker with pid: 3
+2026-05-23 12:32:58 [2026-05-23 12:32:58 +0000] [2] [INFO] Control socket listening at /home/lucida/.gunicorn/gunicorn.ctl
+2026-05-23 12:33:20 [2026-05-23 12:33:20 +0000] [2] [INFO] Starting gunicorn 25.3.0
+2026-05-23 12:33:20 [2026-05-23 12:33:20 +0000] [2] [INFO] Listening at: http://0.0.0.0:8080 (2)
+2026-05-23 12:33:20 [2026-05-23 12:33:20 +0000] [2] [INFO] Using worker: uvicorn.workers.UvicornWorker
+2026-05-23 12:33:20 [2026-05-23 12:33:20 +0000] [3] [INFO] Booting worker with pid: 3
+2026-05-23 12:33:21 [2026-05-23 12:33:21 +0000] [2] [INFO] Control socket listening at /home/lucida/.gunicorn/gunicorn.ctl
+2026-05-23 12:34:19 OPTIONS 200 https://lucida-backend-201742003125.us-central1.run.app/auth/me
+2026-05-23 12:34:32 [2026-05-23 12:34:32 +0000] [3] [INFO] Started server process [3]
+2026-05-23 12:34:32 [2026-05-23 12:34:32 +0000] [3] [INFO] Waiting for application startup.
+2026-05-23 12:34:32 
+2026-05-23 12:34:32 
+2026-05-23 12:34:32 
+2026-05-23 12:34:32 
+2026-05-23 12:34:32 
+2026-05-23 12:34:32 [2026-05-23 12:34:32 +0000] [3] [INFO] Application startup complete.
+2026-05-23 12:34:32 
+2026-05-23 12:34:32 GET 200 https://lucida-backend-201742003125.us-central1.run.app/auth/me
+2026-05-23 12:34:32 
+2026-05-23 12:34:32 
+2026-05-23 12:36:03 OPTIONS 200 https://lucida-backend-201742003125.us-central1.run.app/models
+2026-05-23 12:36:03 
+2026-05-23 12:36:03 GET 200 https://lucida-backend-201742003125.us-central1.run.app/models
+2026-05-23 12:36:04 
+2026-05-23 12:36:07 GET 200 https://lucida-backend-201742003125.us-central1.run.app/models
+2026-05-23 12:36:07 
+2026-05-23 12:36:09 GET 200 https://lucida-backend-201742003125.us-central1.run.app/models
+2026-05-23 12:36:09 
+2026-05-23 12:36:09 GET 200 https://lucida-backend-201742003125.us-central1.run.app/models
+2026-05-23 12:36:09 
+2026-05-23 12:36:16 OPTIONS 200 https://lucida-backend-201742003125.us-central1.run.app/train?model_name=Ensemble-01&mode=supervised
+2026-05-23 12:36:16 
+2026-05-23 12:36:20 POST 200 https://lucida-backend-201742003125.us-central1.run.app/train?model_name=Ensemble-01&mode=supervised
+2026-05-23 12:36:20 
+2026-05-23 12:36:20 
+2026-05-23 12:36:28 
+2026-05-23 12:36:29 
+2026-05-23 12:36:29 
+2026-05-23 12:36:29 
+2026-05-23 12:41:43 GET 200 https://lucida-backend-201742003125.us-central1.run.app/models
+2026-05-23 12:41:43 
+2026-05-23 12:41:52 OPTIONS 200 https://lucida-backend-201742003125.us-central1.run.app/score-csv?model_name=Ensemble-01&auto_select_model=false
+2026-05-23 12:41:52 
+2026-05-23 12:41:56 POST 500 https://lucida-backend-201742003125.us-central1.run.app/score-csv?model_name=Ensemble-01&auto_select_model=false
+2026-05-23 12:42:10 
+2026-05-23 12:42:15 
+2026-05-23 12:51:46 [2026-05-23 12:51:46 +0000] [2] [INFO] Starting gunicorn 25.3.0
+2026-05-23 12:51:46 [2026-05-23 12:51:46 +0000] [2] [INFO] Listening at: http://0.0.0.0:8080 (2)
+2026-05-23 12:51:46 [2026-05-23 12:51:46 +0000] [2] [INFO] Using worker: uvicorn.workers.UvicornWorker
+2026-05-23 12:51:46 [2026-05-23 12:51:46 +0000] [3] [INFO] Booting worker with pid: 3
+2026-05-23 12:51:46 [2026-05-23 12:51:46 +0000] [2] [INFO] Control socket listening at /home/lucida/.gunicorn/gunicorn.ctl
+2026-05-23 12:51:50 [2026-05-23 12:51:50 +0000] [2] [INFO] Starting gunicorn 25.3.0
+2026-05-23 12:51:50 [2026-05-23 12:51:50 +0000] [2] [INFO] Listening at: http://0.0.0.0:8080 (2)
+2026-05-23 12:51:50 [2026-05-23 12:51:50 +0000] [2] [INFO] Using worker: uvicorn.workers.UvicornWorker
+2026-05-23 12:51:50 [2026-05-23 12:51:50 +0000] [3] [INFO] Booting worker with pid: 3
+2026-05-23 12:51:50 [2026-05-23 12:51:50 +0000] [2] [INFO] Control socket listening at /home/lucida/.gunicorn/gunicorn.ctl
