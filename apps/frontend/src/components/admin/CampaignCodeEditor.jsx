@@ -185,7 +185,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
       </div>
 
       {/* Editor Section */}
-      <div className={`lg:col-span-${preview ? '4' : '9'}`}>
+      <div className={preview ? 'lg:col-span-4' : 'lg:col-span-9'}>
         <div className="bg-black border border-white/10 rounded-xl overflow-hidden h-[700px] flex flex-col">
           <div className="bg-white/5 border-b border-white/10 px-4 py-2 flex items-center justify-between">
             <h2 className="text-gray-300 font-mono text-xs">HTML Editor</h2>
