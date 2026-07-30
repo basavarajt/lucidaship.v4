@@ -162,6 +162,7 @@ def init_db():
         "ALTER TABLE scored_leads ADD COLUMN lead_signature TEXT",
         "ALTER TABLE scored_leads ADD COLUMN model_name TEXT",
         "ALTER TABLE scored_leads ADD COLUMN ranking_version TEXT",
+        "ALTER TABLE scored_leads ADD COLUMN scoring_run_id TEXT",
         "ALTER TABLE tenants ADD COLUMN credits INTEGER DEFAULT 1000",
         "ALTER TABLE tenants ADD COLUMN dodo_customer_id TEXT",
         "ALTER TABLE tenants ADD COLUMN free_runs_used INTEGER DEFAULT 0",

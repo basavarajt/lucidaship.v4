@@ -15,7 +15,7 @@ import numpy as np
 from sklearn.metrics import roc_auc_score, accuracy_score, precision_score, recall_score
 
 from app.database import get_db
-from app.core.auth import get_current_user, get_optional_user
+from app.core.auth import get_current_user, get_optional_user, has_full_access
 from app.core.config import get_settings
 from app.core.responses import success_response, error_response
 from app.services import model_storage
@@ -31,6 +31,7 @@ from app.services.job_queue import get_job_queue, JobStatus
 from app.services.column_matcher import find_best_matches
 from app.services.intelligent_imputation import extract_imputation_stats, impute_missing_columns
 from app.services.type_coercion import coerce_series_to_expected_type
+from app.services.behavioral_signals import BehavioralSignalExtractor
 from adaptive_scorer import UniversalAdaptiveScorer, DataAnalyzer, EngagementScorer, ActionRecommender
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,16 @@ job_queue = get_job_queue()
 # ── In-memory model cache ─────────────────────────────────────
 # {tenant_id: {model_name: UniversalAdaptiveScorer}}
 trained_models = {}
+
+
+def _blend_behavioral_score(profile_score: float, relationship_strength: Optional[float], weight: float) -> float:
+    """Blend a behavioral score without allowing it to escape the 0-100 scale."""
+    profile_score = max(0.0, min(100.0, float(profile_score)))
+    if relationship_strength is None:
+        return profile_score
+    relationship_strength = max(0.0, min(100.0, float(relationship_strength)))
+    weight = max(0.0, min(1.0, float(weight)))
+    return round(profile_score * (1.0 - weight) + relationship_strength * weight, 2)
 
 
 def _row_signature(data: dict) -> str:
@@ -629,7 +640,7 @@ def _dedupe_file_payloads(files_data: List[Tuple[str, bytes]]) -> List[Tuple[str
 
 # ── Background task: persist scored leads ────────────────────
 
-def _persist_scores(tenant_id: str, model_name: str, results: list):
+def _persist_scores(tenant_id: str, model_name: str, results: list, scoring_run_id: str):
     """Persist scored leads to the configured database in background (doesn't slow down response)."""
     try:
         conn = get_db()
@@ -651,15 +662,72 @@ def _persist_scores(tenant_id: str, model_name: str, results: list):
             conn.execute(
                 """INSERT INTO scored_leads (
                        id, tenant_id, training_run_id, lead_data, lead_signature,
-                       model_name, ranking_version, final_score, scored_at
+                       model_name, ranking_version, scoring_run_id, final_score, scored_at
                    )
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
-                [lead_id, tenant_id, training_run_id, lead_data, lead_signature, model_name, ranking_version, score],
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                [lead_id, tenant_id, training_run_id, lead_data, lead_signature, model_name, ranking_version, scoring_run_id, score],
             )
 
         logger.info("Persisted %d scored leads for tenant=%s", len(results), tenant_id)
     except Exception as e:
         logger.error("Failed to persist scores: %s", str(e))
+
+
+@router.get("/ranked-lists")
+async def list_saved_ranked_lists(user: dict = Depends(get_current_user)):
+    """List every saved ranking run belonging to the authenticated tenant only."""
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT COALESCE(scoring_run_id, scored_at), model_name, ranking_version,
+                  COUNT(*), MAX(scored_at), MAX(final_score), MIN(final_score)
+           FROM scored_leads
+           WHERE tenant_id = ?
+           GROUP BY COALESCE(scoring_run_id, scored_at), model_name, ranking_version
+           ORDER BY MAX(scored_at) DESC""",
+        [user["tenant_id"]],
+    ).rows
+    return success_response(data={
+        "ranked_lists": [
+            {
+                "run_id": row[0], "model_name": row[1] or "default",
+                "ranking_version": row[2], "lead_count": int(row[3]),
+                "scored_at": row[4], "highest_score": float(row[5]) if row[5] is not None else None,
+                "lowest_score": float(row[6]) if row[6] is not None else None,
+            }
+            for row in rows
+        ]
+    })
+
+
+@router.get("/ranked-lists/{run_id}")
+async def get_saved_ranked_list(run_id: str, user: dict = Depends(get_current_user)):
+    """Return one saved ranking run; the tenant filter prevents cross-account access."""
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT lead_data, final_score, model_name, ranking_version, scored_at
+           FROM scored_leads
+           WHERE tenant_id = ? AND COALESCE(scoring_run_id, scored_at) = ?
+           ORDER BY final_score DESC, id ASC""",
+        [user["tenant_id"], run_id],
+    ).rows
+    if not rows:
+        return error_response("RANKED_LIST_NOT_FOUND", "This ranked list was not found.", 404)
+    results = []
+    for index, row in enumerate(rows, start=1):
+        try:
+            data = json.loads(row[0]) if row[0] else {}
+        except json.JSONDecodeError:
+            data = {}
+        score = float(row[1]) if row[1] is not None else 0.0
+        results.append({
+            "rank": index, "score": score, "profile_score": score, "data": data,
+            "score_band": "high" if score >= 80 else "medium" if score >= 55 else "low",
+        })
+    return success_response(data={
+        "run_id": run_id, "model_name": rows[0][2] or "default",
+        "ranking_version": rows[0][3], "scored_at": rows[0][4],
+        "n_leads": len(results), "results": results,
+    })
 
 
 @router.post("/merge-plan")
@@ -1112,9 +1180,9 @@ def _compare_against_previous_version(
 
 from fastapi import HTTPException
 
-def _check_freemium_limits(tenant_id: str, operation: str, user_role: str = "admin"):
+def _check_freemium_limits(tenant_id: str, operation: str, user_role: str = "admin", user_email: Optional[str] = None):
     """Enforce the 'only first use is free' rule."""
-    if user_role == "guest":
+    if user_role == "guest" or has_full_access(user_email):
         return # Guests are already limited by the frontend to 100 rows and cannot download
         
     conn = get_db()
@@ -1155,7 +1223,7 @@ async def train_model(
     except ValueError as exc:
         return error_response("VALIDATION_ERROR", str(exc), 400)
     tenant_id = user["tenant_id"]
-    _check_freemium_limits(tenant_id, "train", user.get("role", "admin"))
+    _check_freemium_limits(tenant_id, "train", user.get("role", "admin"), user.get("email"))
     try:
         dataset_names = _uploaded_dataset_names(file, files)
         ingested_assets = await _validate_and_ingest_files(
@@ -1309,7 +1377,7 @@ async def train_model_async(
     except ValueError as exc:
         return error_response("VALIDATION_ERROR", str(exc), 400)
     tenant_id = user["tenant_id"]
-    _check_freemium_limits(tenant_id, "train", user.get("role", "admin"))
+    _check_freemium_limits(tenant_id, "train", user.get("role", "admin"), user.get("email"))
     
     try:
         files_data = await _collect_uploaded_file_payloads(
@@ -1475,157 +1543,132 @@ async def score_csv(
     background_tasks: BackgroundTasks = BackgroundTasks(),
     user: dict = Depends(get_optional_user),
 ):
-    """Upload CSVs of leads to score. Protected + tenant-scoped.
-    
-    Returns dual scores:
-    - profile_score: ML-based conversion probability (existing model)
-    - engagement_score: Rule-based engagement momentum (auto-detected)
-    - recommended_action: Based on 2x2 matrix of both scores
-    """
+    """Upload CSVs of leads to score, enrich them with sales signals, and rank them."""
     try:
         model_name = model_storage.validate_model_name(model_name)
     except ValueError as exc:
         return error_response("VALIDATION_ERROR", str(exc), 400)
     tenant_id = user["tenant_id"]
-    _check_freemium_limits(tenant_id, "score", user.get("role", "admin"))
+    _check_freemium_limits(tenant_id, "score", user.get("role", "admin"), user.get("email"))
 
     try:
         dataset_names = _uploaded_dataset_names(file, files)
         ingested_assets = await _validate_and_ingest_files(file, files, request=request, context="scoring")
         assets = _prepare_assets(dataset_names, ingested_assets)
         compression = _compression_summary(assets)
-
         df, merge_plan = _resolve_combined_dataset(assets, compression)
         if df is None or df.empty:
             return error_response("VALIDATION_ERROR", "Missing lead data or empty file provided.", 400)
+
         selected_model_name, scorer, model_selection = _choose_model_for_dataframe(
-            tenant_id,
-            requested_model=model_name,
-            df=df,
-            auto_select_model=auto_select_model,
+            tenant_id, requested_model=model_name, df=df, auto_select_model=auto_select_model,
         )
         if scorer is None or selected_model_name is None:
             status_code = 409 if model_selection.get("status") == "no_confident_model_match" else 404
             return error_response(
                 "MODEL_SELECTION_FAILED",
-                (
-                    "No confident model could be selected for this scoring payload."
-                    if status_code == 409
-                    else f"No model '{model_name}' found. Train first."
-                ),
+                "No confident model could be selected for this scoring payload."
+                if status_code == 409 else f"No model '{model_name}' found. Train first.",
                 status_code,
             )
 
         df, preprocessing_report = _preprocess_scoring_dataframe(scorer, df)
         results = _route_and_score_rows(tenant_id, selected_model_name, scorer, df)
+
+        behavioral_analysis = None
+        if settings.BEHAVIORAL_SIGNALS_ENABLED:
+            behavioral_extractor = BehavioralSignalExtractor()
+            behavioral_analysis = behavioral_extractor.analyze(df)
+            behavioral_extractor.detect_columns(df)
+            blend_weight = max(0.0, min(1.0, settings.BEHAVIORAL_SCORE_BLEND_WEIGHT))
+            for result in results:
+                profile_score = float(result.get("score", 0.0))
+                behavioral = behavioral_extractor.score_lead(pd.Series(result.get("data", {})), df)
+                behavioral_data = {
+                    "intent_score": behavioral.intent_score,
+                    "authority_score": behavioral.authority_score,
+                    "trust_score": behavioral.trust_score,
+                    "urgency_score": behavioral.urgency_score,
+                    "momentum_score": behavioral.momentum_score,
+                    "friction_score": behavioral.friction_score,
+                    "relationship_strength": behavioral.relationship_strength,
+                    "detected_columns": behavioral.detected_columns,
+                    "top_signals": behavioral.top_signals,
+                    "note_tags": behavioral.note_tags,
+                    "has_behavioral_data": behavioral.has_behavioral_data,
+                }
+                result["profile_score"] = profile_score
+                result["behavioral_signals"] = behavioral_data
+                result["score"] = _blend_behavioral_score(
+                    profile_score, behavioral.relationship_strength, blend_weight,
+                )
+                final_score = float(result["score"])
+                result["score_band"] = "high" if final_score >= 80 else "medium" if final_score >= 55 else "low"
+
+            # Psychology changes the final rank, so sort before rank tracking and persistence.
+            results.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
+
         rank_tracking = _compare_against_previous_version(tenant_id, selected_model_name, df, results)
-
         routed_count = sum(1 for row in results if row.get("routing", {}).get("route_type") == "segment")
-
-        # Translate results to sales-friendly language
         enriched_results = translate_scoring_results(results)
 
-        # ── Engagement Scoring (Additive) ─────────────────────────
         engagement_analysis = None
         if include_engagement:
             engagement_scorer = EngagementScorer()
             engagement_analysis = engagement_scorer.analyze(df)
             action_recommender = ActionRecommender()
-            
-            if engagement_analysis['detected_columns']:
-                # Score engagement for each lead
-                for result in enriched_results:
-                    row_data = result.get("data", {})
-                    row = pd.Series(row_data)
-                    eng_result = engagement_scorer.score_lead(row)
-                    profile_score = result.get('score', 0)
-                    engagement_score = eng_result.get('engagement_score')
-                    
-                    # Add engagement data to result
-                    result['profile_score'] = profile_score  # Rename for clarity
-                    result['engagement_score'] = engagement_score
-                    result['engagement_signals'] = eng_result.get('signals', {})
-                    result['engagement_band'] = eng_result.get('engagement_band')
-                    result['top_engagement_signals'] = eng_result.get('top_signals', [])
-                    
-                    # Get action recommendation
-                    action = action_recommender.recommend(profile_score, engagement_score)
-                    result['recommended_action'] = action['action']
-                    result['action_emoji'] = action['emoji']
-                    result['action_color'] = action['color']
-                    result['action_priority'] = action['priority']
-                    result['action_description'] = action['description']
-                    result['action_next_steps'] = action['next_steps']
-                    result['action_confidence'] = action['confidence']
-                    result['quadrant'] = action['quadrant']
-            else:
-                # No engagement columns found - add profile score only with action based on profile
-                for result in enriched_results:
-                    profile_score = result.get('score', 0)
-                    result['profile_score'] = profile_score
-                    result['engagement_score'] = None
-                    result['engagement_signals'] = {}
-                    result['engagement_band'] = None
-                    result['top_engagement_signals'] = []
-                    
-                    action = action_recommender.recommend(profile_score, None)
-                    result['recommended_action'] = action['action']
-                    result['action_emoji'] = action['emoji']
-                    result['action_color'] = action['color']
-                    result['action_priority'] = action['priority']
-                    result['action_description'] = action['description']
-                    result['action_next_steps'] = action['next_steps']
-                    result['action_confidence'] = action['confidence']
-                    result['quadrant'] = action['quadrant']
+            for result in enriched_results:
+                row = pd.Series(result.get("data", {}))
+                eng_result = engagement_scorer.score_lead(row) if engagement_analysis["detected_columns"] else {}
+                score_for_action = float(result.get("score", 0.0))
+                result.setdefault("profile_score", score_for_action)
+                result["engagement_score"] = eng_result.get("engagement_score")
+                result["engagement_signals"] = eng_result.get("signals", {})
+                result["engagement_band"] = eng_result.get("engagement_band")
+                result["top_engagement_signals"] = eng_result.get("top_signals", [])
+                action = action_recommender.recommend(score_for_action, result["engagement_score"])
+                result["recommended_action"] = action["action"]
+                result["action_emoji"] = action["emoji"]
+                result["action_color"] = action["color"]
+                result["action_priority"] = action["priority"]
+                result["action_description"] = action["description"]
+                result["action_next_steps"] = action["next_steps"]
+                result["action_confidence"] = action["confidence"]
+                result["quadrant"] = action["quadrant"]
 
-        # Persist scores in background (doesn't slow response)
-        background_tasks.add_task(_persist_scores, tenant_id, selected_model_name, enriched_results)
-
-        logger.info("Scored %d leads: tenant=%s model=%s", len(enriched_results), tenant_id, selected_model_name)
-
+        scoring_run_id = str(uuid.uuid4())
+        background_tasks.add_task(_persist_scores, tenant_id, selected_model_name, enriched_results, scoring_run_id)
         response_data = {
-            "status": "success",
-            "model_name": selected_model_name,
-            "n_leads": len(enriched_results),
-            "results": enriched_results,
-            "rank_tracking": rank_tracking,
-            "merge_plan": merge_plan,
-            "compression": compression,
-            "model_selection": model_selection,
+            "status": "success", "model_name": selected_model_name, "scoring_run_id": scoring_run_id, "n_leads": len(enriched_results),
+            "results": enriched_results, "rank_tracking": rank_tracking, "merge_plan": merge_plan,
+            "compression": compression, "model_selection": model_selection,
             "preprocessing": preprocessing_report,
-            "routing_summary": {
-                "base_model": selected_model_name,
-                "segment_routed_rows": routed_count,
-                "base_routed_rows": len(enriched_results) - routed_count,
-            },
+            "routing_summary": {"base_model": selected_model_name, "segment_routed_rows": routed_count,
+                                "base_routed_rows": len(enriched_results) - routed_count},
         }
-        
-        # Add engagement summary if included
+        if behavioral_analysis is not None:
+            response_data["behavioral_analysis"] = {
+                **behavioral_analysis, "coverage_percent": round(behavioral_analysis["coverage"], 1),
+            }
         if include_engagement and engagement_analysis:
             response_data["engagement_analysis"] = {
-                "detected_columns": engagement_analysis['detected_columns'],
-                "signals_found": engagement_analysis['signals_found'],
-                "signals_missing": engagement_analysis['signals_missing'],
-                "coverage_percent": round(engagement_analysis['coverage'], 1),
+                "detected_columns": engagement_analysis["detected_columns"],
+                "signals_found": engagement_analysis["signals_found"],
+                "signals_missing": engagement_analysis["signals_missing"],
+                "coverage_percent": round(engagement_analysis["coverage"], 1),
             }
-            
-            # Summary stats
-            if enriched_results:
-                actions_summary = {}
-                for r in enriched_results:
-                    action = r.get('recommended_action', 'UNKNOWN')
-                    actions_summary[action] = actions_summary.get(action, 0) + 1
-                response_data["action_summary"] = actions_summary
-
+            response_data["action_summary"] = {}
+            for result in enriched_results:
+                action = result.get("recommended_action", "UNKNOWN")
+                response_data["action_summary"][action] = response_data["action_summary"].get(action, 0) + 1
         return success_response(data=response_data)
-
-    except ValueError as e:
-        return error_response("VALIDATION_ERROR", str(e), 400)
-    except Exception as e:
+    except ValueError as exc:
+        return error_response("VALIDATION_ERROR", str(exc), 400)
+    except Exception as exc:
         logger.exception("Scoring failed")
         message = "Scoring failed. Please retry or contact support."
         if not settings.is_production:
-            message = f"Scoring failed: {str(e)}"
+            message = f"Scoring failed: {exc}"
         return error_response("SCORING_FAILED", message, 500)
 
 

@@ -14,3 +14,4 @@ lucida_local.db
 lucida_local.db-journal
 tests/
 test_*.py
+test.csv

@@ -1,6 +1,7 @@
 import pandas as pd
+import pytest
 
-from adaptive_scorer import UniversalAdaptiveScorer
+from adaptive_scorer import AdaptiveFeatureEngineering, DataAnalyzer, UniversalAdaptiveScorer
 
 
 def test_training_and_scoring_emit_diagnostics_and_rationale():
@@ -66,10 +67,10 @@ def test_auto_target_detect_handles_binary_values_with_nulls_whitespace_and_mixe
     scorer = UniversalAdaptiveScorer()
     training_result = scorer.train(df_train, client_id="binary-normalization-test")
 
-    assert training_result["analysis"]["target_column"] in {"outcome", "segment"}
+    assert training_result["analysis"]["target_column"] == "outcome"
 
 
-def test_train_falls_back_to_synthetic_target_when_no_binary_column_exists():
+def test_training_requires_real_outcome_when_no_target_is_present():
     df_train = pd.DataFrame(
         {
             "lead_id": [f"id-{i}" for i in range(40)],
@@ -80,7 +81,51 @@ def test_train_falls_back_to_synthetic_target_when_no_binary_column_exists():
     )
 
     scorer = UniversalAdaptiveScorer()
-    training_result = scorer.train(df_train, client_id="synthetic-fallback-test")
+    with pytest.raises(ValueError, match="No genuine binary outcome column"):
+        scorer.train(df_train, client_id="missing-outcome-test")
 
-    assert training_result["analysis"]["target_column"] == "__synthetic_target__"
-    assert training_result["analysis"]["target_diagnostics"]["recommendation"] == "synthetic_target_created"
+
+def test_text_notes_are_selected_only_when_they_have_outcome_signal():
+    rows = 40
+    df = pd.DataFrame(
+        {
+            "converted": [i % 2 for i in range(rows)],
+            "crm_notes": [
+                f"asked for pricing and ready to buy case {i}" if i % 2
+                else f"not interested, no budget case {i}"
+                for i in range(rows)
+            ],
+            "irrelevant_notes": [f"generic follow up {i % 3}" for i in range(rows)],
+        }
+    )
+
+    analyzer = DataAnalyzer(df)
+    analyzer.infer_column_types()
+    analyzer.auto_detect_target()
+    importance = analyzer.compute_feature_importance()
+
+    assert analyzer.column_types["crm_notes"] == "text"
+    assert importance["crm_notes"] > 0
+    assert "crm_notes" in analyzer.filter_relevant_columns()
+
+    engineer = AdaptiveFeatureEngineering(df, analyzer)
+    features = engineer.build_features()
+    assert any(name.startswith("crm_notes_") for name in features.columns)
+
+
+def test_training_removes_exact_duplicates_before_the_holdout_split():
+    base = pd.DataFrame(
+        {
+            "lead_id": [f"id-{i}" for i in range(20)],
+            "interactions": [(i % 2) * 10 + (i % 3) for i in range(20)],
+            "converted": [i % 2 for i in range(20)],
+        }
+    )
+    df = pd.concat([base, base.iloc[[0, 1]]], ignore_index=True)
+
+    scorer = UniversalAdaptiveScorer()
+    result = scorer.train(df, client_id="dedup-test")
+
+    deduplication = result["analysis"]["deduplication"]
+    assert deduplication["exact_duplicates_removed"] == 2
+    assert deduplication["rows_after"] == 20

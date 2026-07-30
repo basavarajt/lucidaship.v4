@@ -22,6 +22,9 @@ def test_enrich_scoring_result_replaces_summary_with_human_explanation():
             "route_type": "segment",
             "matched_segment": {"dimension": "industry", "value": "SaaS"},
         },
+        "behavioral_signals": {
+            "top_signals": ["high_intent_pricing", "authority_vp"]
+        }
     }
 
     enriched = translator.enrich_scoring_result(result)
@@ -31,3 +34,5 @@ def test_enrich_scoring_result_replaces_summary_with_human_explanation():
     assert enriched["explanation_label"] == "Phi-3 Mini Intelligence"
     assert enriched["explanation_source"] == "template_fallback"
     assert "SaaS" in enriched["llm_explanation"] or "segment-specific" in enriched["llm_explanation"]
+    assert "High Intent Pricing" in enriched["llm_explanation"]
+    assert "Authority Vp" in enriched["llm_explanation"]

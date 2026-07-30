@@ -366,6 +366,8 @@ class ExplanationTranslator:
         rank_movement = result.get("rank_movement") or {}
         data = result.get("data") or {}
 
+        behavioral_signals = result.get("behavioral_signals") or {}
+
         return {
             "score": round(float(result.get("score", 0.0)), 2),
             "score_band": result.get("score_band"),
@@ -378,6 +380,7 @@ class ExplanationTranslator:
             "route_reason": routing.get("reason"),
             "matched_segment": matched_segment,
             "rank_movement": rank_movement,
+            "behavioral_signals": behavioral_signals,
         }
 
     def _generate_with_llm(self, context: Dict[str, Any]) -> Optional[str]:
@@ -416,9 +419,10 @@ class ExplanationTranslator:
     def _build_llm_prompt(self, context: Dict[str, Any]) -> str:
         return (
             "You are writing one concise, natural explanation for why a lead ranked where it did.\n"
-            "Write exactly 1-2 sentences in plain business English.\n"
-            "Be specific, human, and non-repetitive.\n"
-            "Mention what pushed the lead up or down.\n"
+            "Write a punchy summary starting with a high-level takeaway like 'High buying intent.' or 'Low momentum.'\n"
+            "Follow up with specific behaviors observed (e.g., requested pricing, involved senior decision-maker).\n"
+            "Conclude with a recommended sales action.\n"
+            "Write exactly 2-3 sentences in plain business English as a sales coach.\n"
             "Do not mention SHAP, features, AI, or the model.\n"
             "Do not use bullet points.\n"
             f"Context: {json.dumps(context, default=str)}"
@@ -441,10 +445,26 @@ class ExplanationTranslator:
         negatives = context.get("top_negative", [])
         route_type = context.get("route_type", "base")
         matched_segment = context.get("matched_segment", {})
+        behavioral = context.get("behavioral_signals", {})
+        top_behavioral = behavioral.get("top_signals", [])
 
         positive_text = self._join_fragments(positives[:2])
         negative_text = self._join_fragments(negatives[:2])
         route_text = self._route_text(route_type, matched_segment)
+        behavioral_labels = [str(signal).lower() for signal in top_behavioral]
+
+        if any("high intent" in label or "buying intent" in label for label in behavioral_labels):
+            takeaway = "High buying intent."
+        elif any("friction" in label for label in behavioral_labels):
+            takeaway = "High friction."
+        elif any("decision maker" in label or "authority" in label for label in behavioral_labels):
+            takeaway = "Strong buying potential."
+        elif score >= 80:
+            takeaway = "Strong fit."
+        elif score >= 55:
+            takeaway = "Promising, with signals to validate."
+        else:
+            takeaway = "Low buying momentum."
 
         if score >= 80:
             openings = [
@@ -471,13 +491,17 @@ class ExplanationTranslator:
         opening = openings[variant]
 
         if positives and negatives:
-            sentence = f"{opening} {positive_text}, but {negative_text.lower()}."
+            sentence = f"{takeaway} {opening} {positive_text}, but {negative_text.lower()}."
         elif positives:
-            sentence = f"{opening} {positive_text}."
+            sentence = f"{takeaway} {opening} {positive_text}."
         elif negatives:
-            sentence = f"{opening} {negative_text.lower()}."
+            sentence = f"{takeaway} {opening} {negative_text.lower()}."
         else:
-            sentence = f"{opening} the profile shows only limited standout signals."
+            sentence = f"{takeaway} {opening} the profile shows only limited standout signals."
+
+        if top_behavioral:
+            beh_text = self._join_fragments([s.replace('_', ' ').title() for s in top_behavioral[:2]])
+            sentence = f"{sentence} Notable behaviors: {beh_text}."
 
         if route_text:
             closers = [
@@ -488,7 +512,14 @@ class ExplanationTranslator:
             ]
             sentence = f"{sentence} {closers[(variant + 1) % len(closers)]}"
 
-        return sentence
+        action = (
+            "Prioritize a direct outreach to confirm timing and next steps."
+            if score >= 80 else
+            "Use a discovery call to validate the buying process and stakeholders."
+            if score >= 55 else
+            "Nurture with a relevant proof point before investing in high-touch outreach."
+        )
+        return f"{sentence} {action}"
 
     def _join_fragments(self, items: List[str]) -> str:
         cleaned = [item.strip() for item in items if item and item.strip()]

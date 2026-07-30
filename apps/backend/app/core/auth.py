@@ -18,6 +18,11 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+
+def has_full_access(email: Optional[str]) -> bool:
+    """Return whether an account has the explicitly configured founder entitlement."""
+    return bool(email and email.casefold() in settings.full_access_emails)
+
 # Initialize Firebase Admin
 if not firebase_admin._apps:
     try:

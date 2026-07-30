@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, Depends
 
 from app.database import get_db
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, has_full_access
 from app.core.responses import success_response
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,7 @@ def get_me(user: dict = Depends(get_current_user)):
             "tenant_id": user["tenant_id"],
             "company_name": tenant_name,
             "plan": plan,
+            "has_full_access": has_full_access(user.get("email")),
         }
     )
 
@@ -73,4 +74,3 @@ def delete_account(user: dict = Depends(get_current_user)):
         message="Account marked for deletion. It will be permanently removed in 30 days. You will be logged out.",
         data={"status": "pending_deletion"}
     )
-

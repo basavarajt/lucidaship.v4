@@ -9,6 +9,7 @@ Universal Adaptive Lead Scorer
 """
 
 import os
+import logging
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple, Optional
@@ -19,6 +20,7 @@ os.environ.setdefault("JOBLIB_MULTIPROCESSING", "0")
 
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 from sklearn.feature_selection import mutual_info_classif
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score, accuracy_score, precision_score, recall_score, brier_score_loss
@@ -26,6 +28,8 @@ from sklearn.calibration import CalibratedClassifierCV
 from imblearn.over_sampling import ADASYN, SMOTE
 from scipy.stats import spearmanr
 import joblib
+
+logger = logging.getLogger(__name__)
 
 try:
     from sklearn.frozen import FrozenEstimator
@@ -52,6 +56,14 @@ except:
 RF_N_JOBS = max(1, int(os.getenv("LUCIDA_RF_N_JOBS", "1")))
 NULL_LIKE_TOKENS = {"", "nan", "none", "null", "n/a", "na"}
 POSITIVE_BINARY_TOKENS = {"1", "yes", "true", "won", "converted", "y", "success"}
+# These names identify fields that conventionally record a business outcome.  A
+# binary field without one of these names (for example, a region flag) is not a
+# safe training label and must be supplied explicitly by the caller.
+OUTCOME_TARGET_TOKENS = {
+    "converted", "conversion", "won", "closed", "purchased", "purchase",
+    "is_converted", "outcome", "status_won", "lead_status", "deal_status",
+    "opportunity_status", "result", "success",
+}
 
 
 def _safe_to_datetime(series: pd.Series) -> pd.Series:
@@ -105,6 +117,14 @@ def _is_binary_series(series: pd.Series) -> bool:
     if non_null.empty:
         return False
     return bool(non_null.nunique() == 2)
+
+
+def _is_outcome_column_name(column: str) -> bool:
+    """Return whether a column name clearly denotes a CRM outcome."""
+    normalized = str(column).strip().lower().replace("-", "_").replace(" ", "_")
+    return normalized in OUTCOME_TARGET_TOKENS or any(
+        token in normalized.split("_") for token in {"converted", "conversion", "won", "closed", "purchased", "outcome"}
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -217,7 +237,10 @@ class DataAnalyzer:
                     pass
 
             # Numeric columns
-            if col_data.dtype in ['int64', 'float64']:
+            # CSVs, NumPy inputs, and database drivers can yield int32,
+            # nullable integer, float32, and other numeric dtypes.  Treat all
+            # numeric dtypes consistently instead of silently omitting them.
+            if pd.api.types.is_numeric_dtype(col_data):
                 unique_count = col_data.nunique()
 
                 # Binary (exactly 2 values)
@@ -234,6 +257,14 @@ class DataAnalyzer:
             if col_data.dtype == 'object':
                 unique_count = col_data.nunique()
                 avg_length = col_data.astype(str).str.len().mean()
+                text_like_ratio = col_data.dropna().astype(str).str.contains(r'\s').mean()
+
+                # Free-text CRM notes are often unique per lead.  Detect prose
+                # before the near-unique ID rule, while requiring whitespace so
+                # UUIDs, emails, and opaque identifiers remain IDs.
+                if avg_length > 20 and unique_count >= 5 and text_like_ratio >= 0.5:
+                    types[col] = 'text'
+                    continue
 
                 # ID (nearly all unique)
                 if unique_count / len(col_data) > 0.95:
@@ -255,25 +286,34 @@ class DataAnalyzer:
 
     def auto_detect_target(self) -> str:
         """
-        Find target column (binary column with strongest predictive power).
+        Find a genuine binary CRM outcome column.
+
+        A binary field alone is not evidence of an outcome: training on fields
+        such as region, segment, or an arbitrary flag produces misleading lead
+        rankings.  Callers can still deliberately select another binary target
+        through ``target_col``.
         """
         if self.target_col and self.target_col in self.df.columns:
+            if not _is_binary_series(self.df[self.target_col]):
+                raise ValueError(
+                    f"Target column '{self.target_col}' must contain exactly two non-null values."
+                )
             self.target_scores = {self.target_col: 1.0}
             self.target_diagnostics = self.get_target_diagnostics()
             return self.target_col
 
         binary_cols = [
             col for col, type_ in self.column_types.items()
-            if type_ == 'binary'
+            if type_ == 'binary' and _is_outcome_column_name(col)
         ]
 
         if not binary_cols:
-            synthetic_target = self._create_synthetic_target()
-            self.target_scores = {synthetic_target: 0.0}
-            self.target_col = synthetic_target
-            self.is_binary_target = True
-            self.target_diagnostics = self.get_target_diagnostics()
-            return synthetic_target
+            raise ValueError(
+                "No genuine binary outcome column was found. Lead ranking needs historical outcomes "
+                "(for example: converted, won, closed, purchased, is_converted, outcome, or status_won). "
+                "Upload CRM history with outcomes, provide target_col explicitly for a verified binary outcome, "
+                "or explicitly use experimental unsupervised training. Synthetic targets are not created automatically."
+            )
 
         # Score each by correlation with numerics
         scores = {}
@@ -302,7 +342,7 @@ class DataAnalyzer:
         return target
 
     def _create_synthetic_target(self) -> str:
-        """Create a deterministic pseudo-target so supervised training can proceed."""
+        """Create an experimental pseudo-target; never invoked by automatic detection."""
         target_name = "__synthetic_target__"
 
         numeric_candidates = [
@@ -420,6 +460,45 @@ class DataAnalyzer:
                     mi = mutual_info_classif(X_encoded.reshape(-1, 1), y, random_state=42)
                     importances[col] = mi[0]
                 except:
+                    importances[col] = 0
+
+        # Text: mutual information over a deliberately bounded TF-IDF view.
+        # This measures whether words/phrases distinguish outcomes without
+        # allowing every free-text field through feature selection.  The bounds
+        # keep this inexpensive relative to the optional embedding stage.
+        for col, type_ in self.column_types.items():
+            if type_ == 'text':
+                try:
+                    texts = self.df[col].fillna('').astype(str)
+                    if texts.str.strip().eq('').all() or texts.nunique() <= 1:
+                        importances[col] = 0
+                        continue
+                    vectorizer = TfidfVectorizer(
+                        max_features=128,
+                        min_df=2,
+                        ngram_range=(1, 2),
+                        strip_accents='unicode',
+                    )
+                    matrix = vectorizer.fit_transform(texts)
+                    if matrix.shape[1] == 0:
+                        importances[col] = 0
+                        continue
+                    # mutual_info_classif treats TF-IDF values as continuous.
+                    # Bound dense conversion to 10k x 128 (~10 MB) so large
+                    # uploads cannot turn relevance filtering into a memory hit.
+                    sample_size = min(len(texts), 10_000)
+                    if sample_size < len(texts):
+                        sample_indices = np.linspace(0, len(texts) - 1, sample_size, dtype=int)
+                        matrix = matrix[sample_indices]
+                        y_for_text = y[sample_indices]
+                    else:
+                        y_for_text = y
+                    mi = mutual_info_classif(matrix.toarray(), y_for_text, random_state=42)
+                    # The strongest discriminative terms are the appropriate
+                    # column-level signal; averaging would suppress focused CRM
+                    # note patterns.
+                    importances[col] = float(np.max(mi)) if len(mi) else 0
+                except Exception:
                     importances[col] = 0
 
         # Temporal: recency
@@ -548,6 +627,7 @@ class AdaptiveFeatureEngineering:
         self.scalers = {}
         self.encoders = {}
         self.pca_models = {}
+        self.text_vectorizers = {}
         self.one_hot_categories = {}
         self.numeric_imputers = {}
         self.temporal_baselines = {}
@@ -644,6 +724,31 @@ class AdaptiveFeatureEngineering:
                     self.pca_models[col] = pca
             except Exception as e:
                 print(f"Warning: Text embedding skipped ({e})")
+        elif text_cols:
+            # Sentence-transformers is optional. Keep selected notes useful in
+            # lightweight deployments with a compact, serializable fallback.
+            for col in text_cols:
+                try:
+                    vectorizer = TfidfVectorizer(
+                        max_features=32,
+                        min_df=2,
+                        ngram_range=(1, 2),
+                        strip_accents='unicode',
+                    )
+                    matrix = vectorizer.fit_transform(self.df[col].fillna('').astype(str))
+                    if matrix.shape[1] == 0:
+                        continue
+                    X_text = pd.DataFrame(
+                        matrix.toarray(),
+                        index=self.df.index,
+                        columns=[f"{col}_tfidf_{i}" for i in range(matrix.shape[1])],
+                    )
+                    X = pd.concat([X, X_text], axis=1)
+                    self.text_vectorizers[col] = vectorizer
+                    for i, term in enumerate(vectorizer.get_feature_names_out()):
+                        self._register_lineage(f"{col}_tfidf_{i}", col, "text_tfidf", category=str(term))
+                except Exception as e:
+                    print(f"Warning: Text TF-IDF fallback skipped ({e})")
 
         # 4. TEMPORAL columns
         temporal_cols = [c for c in relevant_cols if column_types[c] == 'temporal']
@@ -720,6 +825,20 @@ class AdaptiveFeatureEngineering:
 
                     for i in range(3):
                         X[f"{col}_emb_{i}"] = compressed[:, i]
+                except:
+                    pass
+
+        # 3b. TEXT TF-IDF fallback
+        for col, vectorizer in self.text_vectorizers.items():
+            if col in df_new.columns:
+                try:
+                    matrix = vectorizer.transform(df_new[col].fillna('').astype(str))
+                    X_text = pd.DataFrame(
+                        matrix.toarray(),
+                        index=df_new.index,
+                        columns=[f"{col}_tfidf_{i}" for i in range(matrix.shape[1])],
+                    )
+                    X = pd.concat([X, X_text], axis=1)
                 except:
                     pass
 
@@ -1406,15 +1525,37 @@ class UniversalAdaptiveScorer:
         df = pd.read_csv(csv_path)
         return self.train(df, target_col=target_col)
 
-    def train(self, df: pd.DataFrame, target_col: Optional[str] = None, client_id: str = "default") -> Dict:
+    def train(
+        self,
+        df: pd.DataFrame,
+        target_col: Optional[str] = None,
+        client_id: str = "default",
+        remove_exact_duplicates: bool = True,
+    ) -> Dict:
         """
         Full training pipeline.
         
         Input: DataFrame (any structure)
         Output: Trained model ready for scoring
         """
+        # Exact duplicate rows are ordinarily ingestion artifacts.  Deduplicate
+        # before splitting so the same observation cannot leak into holdout.
+        # Index values are deliberately retained for downstream callers that
+        # use them to relate predictions back to the uploaded file.
+        original_rows = len(df)
+        training_df = df.copy()
+        if remove_exact_duplicates:
+            training_df = training_df.loc[~training_df.duplicated(keep='first')].copy()
+        duplicates_removed = original_rows - len(training_df)
+        if duplicates_removed:
+            logger.info("Removed %d exact duplicate training rows (retained %d)", duplicates_removed, len(training_df))
+        if len(training_df) < 10:
+            raise ValueError(
+                f"Need at least 10 distinct rows after exact-duplicate removal; got {len(training_df)}."
+            )
+
         # Step 1: Analyze raw schema and determine target
-        bootstrap_analyzer = DataAnalyzer(df, target_col=target_col)
+        bootstrap_analyzer = DataAnalyzer(training_df, target_col=target_col)
         bootstrap_analyzer.infer_column_types()
         target = bootstrap_analyzer.auto_detect_target()
         bootstrap_df = bootstrap_analyzer.df.copy()
@@ -1461,6 +1602,12 @@ class UniversalAdaptiveScorer:
                 'target_diagnostics': self.analyzer.get_target_diagnostics(),
                 'n_features': int(analysis['n_features']),
                 'validation_context': validation_context,
+                'deduplication': {
+                    'enabled': bool(remove_exact_duplicates),
+                    'rows_before': int(original_rows),
+                    'exact_duplicates_removed': int(duplicates_removed),
+                    'rows_after': int(len(training_df)),
+                },
                 'feature_blueprint': self.engineer.summarize_feature_blueprint(),
                 'top_features': [
                     (str(feat), float(imp)) 

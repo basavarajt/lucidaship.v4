@@ -1,0 +1,1518 @@
+# Complete Resend Email API Admin Platform
+## Build a Full-Featured Email Management System Using Resend API
+
+---
+
+## 🎯 Mission Statement
+
+Build a **complete email marketing & transactional platform** that replicates and extends Resend's dashboard functionality, entirely within your own admin interface. 
+
+**Goal:** One API key. Complete control. Never touch `resend.com/dashboard` again.
+
+**What you'll build:**
+- Transactional email sending (password resets, confirmations, notifications)
+- Marketing campaigns & broadcasts to audience segments
+- Contact/subscriber management with custom properties
+- Email template builder & management
+- Real-time analytics dashboard (opens, clicks, bounces, complaints)
+- Webhook event handling & audit logs
+- Domain management & verification
+- Full audit trail & compliance features
+
+---
+
+## 📋 Resend API Overview
+
+<cite index="11-1">Resend's API is built on REST principles with HTTPS enforcement</cite>. Here's the complete API capability matrix:
+
+### Core API Endpoints (Complete List)
+
+| Feature | Endpoint | Method | Purpose |
+|---------|----------|--------|---------|
+| **EMAILS** | `/emails` | POST | Send transactional emails |
+| | `/emails` | GET | List sent emails (with pagination) |
+| | `/emails/{id}` | GET | Get single email details |
+| **CONTACTS** | `/contacts` | POST | Create/add contact |
+| | `/contacts` | GET | List all contacts (paginated) |
+| | `/contacts/{id}` | GET | Get single contact |
+| | `/contacts/{id}` | PUT | Update contact (change properties, subscription status) |
+| | `/contacts/{id}` | DELETE | Remove contact |
+| **AUDIENCES** | `/audiences` | POST | Create audience/segment |
+| | `/audiences` | GET | List all audiences |
+| | `/audiences/{id}` | GET | Get audience details |
+| | `/audiences/{id}` | PUT | Update audience |
+| | `/audiences/{id}` | DELETE | Delete audience |
+| **CONTACTS IN AUDIENCE** | `/audiences/{id}/contacts` | GET | List contacts in audience |
+| | `/audiences/{id}/contacts` | POST | Add contact to audience |
+| **BROADCASTS** | `/broadcasts` | POST | Create broadcast campaign |
+| | `/broadcasts` | GET | List all broadcasts |
+| | `/broadcasts/{id}` | GET | Get broadcast details & stats |
+| | `/broadcasts/{id}/send` | POST | Send broadcast immediately |
+| | `/broadcasts/{id}` | PUT | Update draft broadcast |
+| | `/broadcasts/{id}` | DELETE | Delete broadcast |
+| **TEMPLATES** | `/templates` | POST | Create email template |
+| | `/templates` | GET | List all templates |
+| | `/templates/{id}` | GET | Get template |
+| | `/templates/{id}` | PUT | Update template |
+| | `/templates/{id}` | DELETE | Delete template |
+| | `/templates/{id}/publish` | POST | Publish template version |
+| **DOMAINS** | `/domains` | POST | Add domain for sending |
+| | `/domains` | GET | List domains |
+| | `/domains/{id}` | GET | Get domain (including DNS records) |
+| | `/domains/{id}` | DELETE | Remove domain |
+| | `/domains/{id}/verify` | POST | Verify domain ownership |
+| **WEBHOOKS** | `/webhooks` | POST | Create webhook endpoint |
+| | `/webhooks` | GET | List webhooks |
+| | `/webhooks/{id}` | GET | Get webhook details |
+| | `/webhooks/{id}` | PUT | Update webhook |
+| | `/webhooks/{id}` | DELETE | Delete webhook |
+| **TAGS** | `/tags` | POST | Create tag for organizing |
+| | `/tags` | GET | List all tags |
+| | `/tags/{id}` | DELETE | Delete tag |
+| **API KEYS** | `/api-keys` | POST | Create new API key |
+| | `/api-keys` | GET | List API keys |
+| | `/api-keys/{id}` | DELETE | Revoke API key |
+
+---
+
+## 🔑 Authentication & Setup
+
+### Environment Variables Required
+
+```bash
+# Resend API Key (from https://resend.com/api-keys)
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Your admin panel secret (for protecting admin endpoints)
+ADMIN_SECRET_KEY=your-super-secret-admin-key
+
+# Webhook signing secret (for verifying Resend webhooks)
+RESEND_WEBHOOK_SECRET=whsec_xxxxxxxx
+
+# Sender domain (must be verified in Resend)
+SENDER_DOMAIN=noreply@yourdomain.com
+SENDER_NAME="Your Company"
+```
+
+### Authentication Strategy
+
+All Resend API calls use Bearer token authentication:
+
+```bash
+Authorization: Bearer re_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Content-Type: application/json
+User-Agent: your-app/1.0
+```
+
+**Admin endpoints** in your platform use your own token (`ADMIN_SECRET_KEY`).
+
+---
+
+## 🏗️ System Architecture
+
+```
+Your Admin Dashboard (React)
+        │
+        ├─────────────────────────────────┐
+        │                                 │
+        ▼                                 ▼
+Your Backend (FastAPI/Node)       Resend API
+        │                           (https://api.resend.com)
+        │                                 │
+        ├─ Store data locally            ├─ Send emails
+        ├─ Manage admin users            ├─ Manage contacts/audiences
+        ├─ Log all actions               ├─ Send broadcasts
+        ├─ Cache analytics               ├─ Track opens/clicks
+        └─ Handle webhooks ◄─────────────┘ (send events)
+                │
+                ▼
+            Database
+            (Firestore/PostgreSQL)
+            - Contacts (cached copy)
+            - Broadcasts (cached)
+            - Templates (cached)
+            - Analytics
+            - Admin audit logs
+```
+
+---
+
+## 📧 Email Sending (Transactional)
+
+### Endpoint: POST `/emails`
+
+Send single or batch transactional emails (password resets, receipts, notifications).
+
+**Request Body:**
+
+```json
+{
+  "from": "Lucida <noreply@lucida.com>",
+  "to": "user@example.com",
+  "cc": ["cc@example.com"],
+  "bcc": ["bcc@example.com"],
+  "reply_to": "support@lucida.com",
+  "subject": "Welcome to Lucida Analytics",
+  "html": "<h1>Welcome!</h1><p>Your account is ready.</p>",
+  "text": "Welcome! Your account is ready.",
+  "headers": {
+    "X-Custom-Header": "value"
+  },
+  "attachments": [
+    {
+      "filename": "invoice.pdf",
+      "content": "base64-encoded-file-content"
+    }
+  ],
+  "tags": ["password-reset", "transactional"],
+  "idempotency_key": "unique-key-for-this-email-12345"
+}
+```
+
+**Key Features:**
+
+- **`from`**: Must be verified domain or Resend testing domain (`onboarding@resend.dev`)
+- **`to`**: Single or array of emails
+- **`cc`, `bcc`**: Optional
+- **`headers`**: Custom headers (useful for tracking parameters)
+- **`attachments`**: Up to 25MB total, base64 encoded
+- **`tags`**: Organize emails by type (appears in analytics)
+- **`idempotency_key`**: Prevents duplicate sends if request retried
+
+**Response (200 OK):**
+
+```json
+{
+  "id": "sent_abc123def456",
+  "from": "noreply@lucida.com",
+  "to": "user@example.com",
+  "created_at": "2025-01-15T10:30:45.000Z"
+}
+```
+
+**Error Handling:**
+
+```json
+{
+  "message": "Invalid email address",
+  "code": "invalid_email"
+}
+```
+
+### Admin Implementation: Email Sending Interface
+
+Your FastAPI endpoint that wraps Resend:
+
+```python
+# backend/api/emails/send.py
+from fastapi import APIRouter, HTTPException
+import httpx
+import os
+
+router = APIRouter(prefix="/api/admin/emails", tags=["emails"])
+RESEND_KEY = os.getenv("RESEND_API_KEY")
+RESEND_URL = "https://api.resend.com"
+
+@router.post("/send")
+async def send_email(
+    to: str,
+    subject: str,
+    html: str,
+    cc: list = None,
+    bcc: list = None,
+    attachments: list = None,
+    tags: list = None,
+    admin_key: str = Header(...)  # Require admin token
+):
+    """Send transactional email via Resend"""
+    
+    # Verify admin
+    if admin_key != os.getenv("ADMIN_SECRET_KEY"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    payload = {
+        "from": os.getenv("SENDER_DOMAIN"),
+        "to": to,
+        "subject": subject,
+        "html": html,
+        "tags": tags or ["admin-sent"],
+        "idempotency_key": f"admin-{uuid.uuid4()}"
+    }
+    
+    if cc: payload["cc"] = cc
+    if bcc: payload["bcc"] = bcc
+    if attachments: payload["attachments"] = attachments
+    
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{RESEND_URL}/emails",
+            json=payload,
+            headers={"Authorization": f"Bearer {RESEND_KEY}"}
+        )
+    
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.json())
+    
+    data = resp.json()
+    
+    # Log email send to your database
+    db.email_logs.insert_one({
+        "resend_id": data["id"],
+        "to": to,
+        "subject": subject,
+        "status": "sent",
+        "sent_at": datetime.now(),
+        "admin_user": admin_key  # Track who sent it
+    })
+    
+    return {"success": True, "email_id": data["id"]}
+```
+
+---
+
+## 👥 Contact Management
+
+### Full Contact Lifecycle
+
+Resend allows you to manage subscriber lists programmatically.
+
+### 1. Create Contact: POST `/contacts`
+
+```json
+{
+  "email": "john@example.com",
+  "first_name": "John",
+  "last_name": "Doe",
+  "custom_property": "value123",
+  "another_property": "data456",
+  "unsubscribed": false
+}
+```
+
+**Response:**
+
+```json
+{
+  "id": "contact_abc123def",
+  "email": "john@example.com",
+  "created_at": "2025-01-15T10:30:00.000Z",
+  "properties": {
+    "first_name": "John",
+    "last_name": "Doe",
+    "custom_property": "value123"
+  }
+}
+```
+
+### 2. List Contacts: GET `/contacts?limit=50&after=cursor`
+
+<cite index="16-1">Contacts in Resend are global entities linked to a specific email address</cite>.
+
+**Query Parameters:**
+
+- `limit`: Max 100, default 50
+- `after`: Cursor for pagination
+
+**Response:**
+
+```json
+{
+  "data": [
+    {
+      "id": "contact_abc123",
+      "email": "john@example.com",
+      "first_name": "John",
+      "last_name": "Doe",
+      "created_at": "2025-01-15T10:30:00.000Z",
+      "properties": {...},
+      "unsubscribed": false,
+      "unsubscribe_reason": null,
+      "updated_at": "2025-01-15T10:30:00.000Z"
+    }
+  ],
+  "pagination": {
+    "mode": "cursor",
+    "count": 50,
+    "cursors": {
+      "next": "next_cursor_123",
+      "previous": "prev_cursor_456"
+    }
+  }
+}
+```
+
+### 3. Update Contact: PUT `/contacts/{id}`
+
+```json
+{
+  "first_name": "Johnny",
+  "unsubscribed": true,
+  "unsubscribe_reason": "user_requested",
+  "new_custom_field": "updated_value"
+}
+```
+
+### 4. Delete Contact: DELETE `/contacts/{id}`
+
+---
+
+### Admin Panel: Contact Management UI
+
+**React Component:**
+
+```tsx
+// components/admin/ContactManager.tsx
+import { useState, useEffect } from 'react';
+
+export default function ContactManager() {
+  const [contacts, setContacts] = useState([]);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetchContacts();
+  }, []);
+
+  const fetchContacts = async () => {
+    setLoading(true);
+    const res = await fetch('/api/admin/contacts', {
+      headers: { 'Authorization': `Bearer ${adminToken}` }
+    });
+    setContacts(await res.json());
+    setLoading(false);
+  };
+
+  const addContact = async (email, firstName, lastName, properties) => {
+    const res = await fetch('/api/admin/contacts/create', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${adminToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        email,
+        first_name: firstName,
+        last_name: lastName,
+        ...properties
+      })
+    });
+    const contact = await res.json();
+    setContacts([...contacts, contact]);
+  };
+
+  const updateContact = async (id, updates) => {
+    const res = await fetch(`/api/admin/contacts/${id}`, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${adminToken}` },
+      body: JSON.stringify(updates)
+    });
+    const updated = await res.json();
+    setContacts(contacts.map(c => c.id === id ? updated : c));
+  };
+
+  const removeContact = async (id) => {
+    await fetch(`/api/admin/contacts/${id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${adminToken}` }
+    });
+    setContacts(contacts.filter(c => c.id !== id));
+  };
+
+  return (
+    <div className="contact-manager">
+      <h2>Contacts ({contacts.length})</h2>
+      
+      <div className="search-bar">
+        <input
+          type="text"
+          placeholder="Search by email..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
+      <button onClick={() => addContact(prompt('Email?'), ...)}>
+        + Add Contact
+      </button>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Email</th>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {contacts
+            .filter(c => c.email.includes(search))
+            .map(contact => (
+              <tr key={contact.id}>
+                <td>{contact.email}</td>
+                <td>{contact.first_name} {contact.last_name}</td>
+                <td>
+                  <span className={contact.unsubscribed ? 'red' : 'green'}>
+                    {contact.unsubscribed ? 'Unsubscribed' : 'Active'}
+                  </span>
+                </td>
+                <td>{new Date(contact.created_at).toLocaleDateString()}</td>
+                <td>
+                  <button onClick={() => updateContact(contact.id, { unsubscribed: !contact.unsubscribed })}>
+                    {contact.unsubscribed ? 'Resubscribe' : 'Unsubscribe'}
+                  </button>
+                  <button onClick={() => removeContact(contact.id)}>Delete</button>
+                </td>
+              </tr>
+            ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+```
+
+---
+
+## 📊 Audiences (Segments)
+
+### What are Audiences?
+
+<cite index="15-1">Audiences are used to group and control contacts. You can send emails to entire Audiences via Broadcasts</cite>.
+
+### 1. Create Audience: POST `/audiences`
+
+```json
+{
+  "name": "Premium Users",
+  "description": "Users with paid subscription"
+}
+```
+
+**Response:**
+
+```json
+{
+  "id": "aud_abc123xyz",
+  "name": "Premium Users",
+  "description": "Users with paid subscription",
+  "created_at": "2025-01-15T10:30:00.000Z"
+}
+```
+
+### 2. List Audiences: GET `/audiences?limit=50`
+
+```json
+{
+  "data": [
+    {
+      "id": "aud_abc123",
+      "name": "Premium Users",
+      "description": "Users with paid subscription",
+      "contacts_count": 1245,
+      "created_at": "2025-01-15T10:30:00.000Z"
+    }
+  ],
+  "pagination": {...}
+}
+```
+
+### 3. Add Contact to Audience: POST `/audiences/{id}/contacts`
+
+```json
+{
+  "email": "john@example.com"
+}
+```
+
+**Or in bulk:**
+
+```json
+{
+  "emails": ["john@example.com", "jane@example.com", "bob@example.com"]
+}
+```
+
+### 4. List Contacts in Audience: GET `/audiences/{id}/contacts?limit=50`
+
+```json
+{
+  "data": [
+    {
+      "id": "contact_abc123",
+      "email": "john@example.com",
+      "created_at": "2025-01-15T10:30:00.000Z"
+    }
+  ],
+  "pagination": {...}
+}
+```
+
+### 5. Remove Contact from Audience: DELETE `/audiences/{id}/contacts/{contact_id}`
+
+### 6. Update Audience: PUT `/audiences/{id}`
+
+```json
+{
+  "name": "Premium Users - Active"
+}
+```
+
+---
+
+## 📨 Broadcasts (Marketing Campaigns)
+
+### What are Broadcasts?
+
+<cite index="12-1">Broadcasts allow you to send emails to Audiences with dynamic content personalization and automatic unsubscribe handling</cite>.
+
+### 1. Create Broadcast: POST `/broadcasts`
+
+```json
+{
+  "audience_id": "aud_abc123xyz",
+  "name": "Q1 Product Launch",
+  "subject": "🚀 Lucida Q1 Updates — Universal Lead Scoring",
+  "html": "<h1>Welcome</h1><p>Hi {{first_name}},</p><p>We've launched...</p>",
+  "from": "noreply@lucida.com",
+  "reply_to": "support@lucida.com",
+  "scheduled_at": "2025-02-01T10:00:00Z",
+  "tags": ["marketing", "q1-launch"],
+  "track_opens": true,
+  "track_clicks": true,
+  "preview_text": "Check out our latest features"
+}
+```
+
+**Dynamic Content:**
+
+- `{{first_name}}` — replaced with contact's first_name
+- `{{last_name}}` — replaced with contact's last_name
+- `{{custom_property}}` — replaced with custom contact property
+- `{{{RESEND_UNSUBSCRIBE_URL}}}` — automatic unsubscribe link (required)
+
+**Response:**
+
+```json
+{
+  "id": "broadcast_abc123def",
+  "audience_id": "aud_abc123xyz",
+  "name": "Q1 Product Launch",
+  "subject": "🚀 Lucida Q1 Updates",
+  "status": "draft",
+  "scheduled_at": "2025-02-01T10:00:00Z",
+  "created_at": "2025-01-15T10:30:00.000Z"
+}
+```
+
+### 2. List Broadcasts: GET `/broadcasts?limit=50&status=sent`
+
+**Query Params:**
+
+- `status`: 'draft', 'scheduled', 'sent', 'sending'
+
+**Response:**
+
+```json
+{
+  "data": [
+    {
+      "id": "broadcast_abc123",
+      "name": "Q1 Product Launch",
+      "status": "sent",
+      "audience_id": "aud_abc123",
+      "recipients": 1245,
+      "opened": 423,
+      "clicked": 89,
+      "bounced": 3,
+      "unsubscribed": 12,
+      "sent_at": "2025-02-01T10:00:00.000Z",
+      "created_at": "2025-01-15T10:30:00.000Z"
+    }
+  ]
+}
+```
+
+### 3. Get Broadcast Details: GET `/broadcasts/{id}`
+
+Includes detailed statistics:
+
+```json
+{
+  "id": "broadcast_abc123",
+  "name": "Q1 Product Launch",
+  "status": "sent",
+  "recipients": 1245,
+  "delivered": 1240,
+  "delivery_rate": "99.6%",
+  "opened": 423,
+  "open_rate": "34.1%",
+  "clicked": 89,
+  "click_rate": "7.1%",
+  "bounced": 3,
+  "bounce_rate": "0.24%",
+  "complained": 1,
+  "complaint_rate": "0.08%",
+  "unsubscribed": 12,
+  "unsubscribe_rate": "0.96%",
+  "sent_at": "2025-02-01T10:00:00.000Z"
+}
+```
+
+### 4. Send Broadcast: POST `/broadcasts/{id}/send`
+
+```json
+{
+  "scheduled_at": "2025-02-01T10:00:00Z"  // or send now if omitted
+}
+```
+
+**To send immediately (blank body):**
+
+```json
+{}
+```
+
+**Response:**
+
+```json
+{
+  "id": "broadcast_abc123",
+  "status": "sending"
+}
+```
+
+### 5. Update Broadcast (Draft Only): PUT `/broadcasts/{id}`
+
+```json
+{
+  "subject": "Updated Subject Line",
+  "html": "<p>Updated content</p>"
+}
+```
+
+### 6. Delete Broadcast: DELETE `/broadcasts/{id}`
+
+Only works on draft broadcasts.
+
+---
+
+### Admin Panel: Broadcast Campaign Builder
+
+**FastAPI Backend:**
+
+```python
+# backend/api/campaigns/broadcast.py
+@router.post("/api/admin/campaigns/create")
+async def create_campaign(
+    name: str,
+    audience_id: str,
+    subject: str,
+    html: str,
+    scheduled_at: datetime = None,
+    admin_key: str = Header(...)
+):
+    """Create a broadcast via Resend"""
+    
+    if admin_key != os.getenv("ADMIN_SECRET_KEY"):
+        raise HTTPException(status_code=401)
+    
+    payload = {
+        "audience_id": audience_id,
+        "name": name,
+        "subject": subject,
+        "html": html,
+        "from": os.getenv("SENDER_DOMAIN"),
+        "track_opens": True,
+        "track_clicks": True
+    }
+    
+    if scheduled_at:
+        payload["scheduled_at"] = scheduled_at.isoformat()
+    
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "https://api.resend.com/broadcasts",
+            json=payload,
+            headers={"Authorization": f"Bearer {RESEND_KEY}"}
+        )
+    
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.json())
+    
+    broadcast = resp.json()
+    
+    # Store broadcast in your database
+    db.campaigns.insert_one({
+        "resend_id": broadcast["id"],
+        "name": name,
+        "status": "draft",
+        "audience_id": audience_id,
+        "created_by": admin_key,
+        "created_at": datetime.now()
+    })
+    
+    return broadcast
+
+
+@router.post("/api/admin/campaigns/{campaign_id}/send")
+async def send_campaign(campaign_id: str, admin_key: str = Header(...)):
+    """Send a broadcast campaign"""
+    
+    if admin_key != os.getenv("ADMIN_SECRET_KEY"):
+        raise HTTPException(status_code=401)
+    
+    campaign = db.campaigns.find_one({"_id": campaign_id})
+    resend_id = campaign["resend_id"]
+    
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"https://api.resend.com/broadcasts/{resend_id}/send",
+            json={},
+            headers={"Authorization": f"Bearer {RESEND_KEY}"}
+        )
+    
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.json())
+    
+    # Update status
+    db.campaigns.update_one(
+        {"_id": campaign_id},
+        {"$set": {"status": "sending", "sent_at": datetime.now()}}
+    )
+    
+    return {"success": True, "status": "sending"}
+
+
+@router.get("/api/admin/campaigns/{campaign_id}/stats")
+async def get_campaign_stats(campaign_id: str, admin_key: str = Header(...)):
+    """Get campaign engagement analytics"""
+    
+    if admin_key != os.getenv("ADMIN_SECRET_KEY"):
+        raise HTTPException(status_code=401)
+    
+    campaign = db.campaigns.find_one({"_id": campaign_id})
+    resend_id = campaign["resend_id"]
+    
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"https://api.resend.com/broadcasts/{resend_id}",
+            headers={"Authorization": f"Bearer {RESEND_KEY}"}
+        )
+    
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code)
+    
+    stats = resp.json()
+    return {
+        "name": stats["name"],
+        "status": stats["status"],
+        "recipients": stats["recipients"],
+        "delivered": stats["delivered"],
+        "opened": stats["opened"],
+        "open_rate": f"{(stats['opened']/stats['recipients']*100):.1f}%",
+        "clicked": stats["clicked"],
+        "click_rate": f"{(stats['clicked']/stats['recipients']*100):.1f}%",
+        "bounced": stats["bounced"],
+        "unsubscribed": stats["unsubscribed"],
+        "sent_at": stats.get("sent_at")
+    }
+```
+
+**React Campaign Builder UI:**
+
+```tsx
+// components/admin/CampaignBuilder.tsx
+import { useState } from 'react';
+
+export default function CampaignBuilder() {
+  const [name, setName] = useState('');
+  const [subject, setSubject] = useState('');
+  const [html, setHtml] = useState('');
+  const [audience, setAudience] = useState('');
+  const [scheduledAt, setScheduledAt] = useState('');
+  const [stats, setStats] = useState(null);
+
+  const handleCreate = async () => {
+    const res = await fetch('/api/admin/campaigns/create', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        name, subject, html, audience_id: audience,
+        scheduled_at: scheduledAt
+      })
+    });
+    const campaign = await res.json();
+    alert(`Campaign created: ${campaign.id}`);
+  };
+
+  const handleSend = async (campaignId) => {
+    const res = await fetch(`/api/admin/campaigns/${campaignId}/send`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${adminToken}` }
+    });
+    alert('Campaign sent!');
+  };
+
+  const handleLoadStats = async (campaignId) => {
+    const res = await fetch(`/api/admin/campaigns/${campaignId}/stats`, {
+      headers: { 'Authorization': `Bearer ${adminToken}` }
+    });
+    setStats(await res.json());
+  };
+
+  return (
+    <div className="campaign-builder">
+      <h2>Create Campaign</h2>
+      
+      <input
+        type="text"
+        placeholder="Campaign Name"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      />
+      
+      <select value={audience} onChange={(e) => setAudience(e.target.value)}>
+        <option>Select Audience...</option>
+        {/* Load from /api/admin/audiences */}
+      </select>
+      
+      <input
+        type="text"
+        placeholder="Email Subject"
+        value={subject}
+        onChange={(e) => setSubject(e.target.value)}
+      />
+      
+      <textarea
+        placeholder="Email HTML (use {{first_name}}, {{last_name}}, etc.)"
+        value={html}
+        onChange={(e) => setHtml(e.target.value)}
+        rows={12}
+      />
+      
+      <input
+        type="datetime-local"
+        placeholder="Schedule (leave empty for immediate)"
+        value={scheduledAt}
+        onChange={(e) => setScheduledAt(e.target.value)}
+      />
+      
+      <button onClick={handleCreate}>Create Draft</button>
+      
+      {stats && (
+        <div className="stats">
+          <h3>Campaign Stats</h3>
+          <p>Recipients: {stats.recipients}</p>
+          <p>Delivered: {stats.delivered}</p>
+          <p>Open Rate: {stats.open_rate}</p>
+          <p>Click Rate: {stats.click_rate}</p>
+          <p>Unsubscribed: {stats.unsubscribed}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## 📝 Email Templates
+
+### Create Template: POST `/templates`
+
+```json
+{
+  "name": "Welcome Email",
+  "subject": "Welcome to {{app_name}}!",
+  "html": "<h1>Hi {{first_name}},</h1><p>Welcome aboard!</p>",
+  "text": "Welcome!"
+}
+```
+
+### Manage Templates
+
+```python
+# GET /templates — list all
+# GET /templates/{id} — get one
+# PUT /templates/{id} — update
+# DELETE /templates/{id} — delete
+# POST /templates/{id}/publish — publish version
+```
+
+---
+
+## 🔔 Webhooks (Real-Time Events)
+
+### What Webhook Events Exist?
+
+<cite index="19-1">Resend webhooks trigger on 15 different events, including email delivered, opened, clicked, bounced, unsubscribed, and more</cite>.
+
+### Complete Webhook Events List
+
+```
+email.sent
+email.delivered
+email.delivery_delayed
+email.bounced          (hard bounce)
+email.deferred         (soft bounce)
+email.opened
+email.link.clicked
+email.complained
+email.unsubscribed
+contact.created
+contact.updated
+contact.deleted
+broadcast.sent
+broadcast.opened
+broadcast.clicked
+```
+
+### 1. Create Webhook: POST `/webhooks`
+
+```json
+{
+  "events": [
+    "email.opened",
+    "email.clicked",
+    "email.bounced",
+    "email.complained",
+    "email.unsubscribed"
+  ],
+  "url": "https://yourplatform.com/api/webhooks/resend"
+}
+```
+
+**Response:**
+
+```json
+{
+  "id": "webhook_abc123def",
+  "events": ["email.opened", "email.clicked", ...],
+  "url": "https://yourplatform.com/api/webhooks/resend",
+  "created_at": "2025-01-15T10:30:00.000Z",
+  "signing_secret": "whsec_xxxxxxxxxxxxxxxx"
+}
+```
+
+### 2. List Webhooks: GET `/webhooks`
+
+### 3. Update Webhook: PUT `/webhooks/{id}`
+
+### 4. Delete Webhook: DELETE `/webhooks/{id}`
+
+---
+
+### Webhook Handling in Your Backend
+
+```python
+# backend/api/webhooks/resend.py
+from fastapi import APIRouter, Request
+from resend import Resend
+import hmac
+import hashlib
+import json
+
+router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
+
+@router.post("/resend")
+async def handle_resend_webhook(request: Request):
+    """
+    Handle all Resend webhook events:
+    - Email opened/clicked
+    - Email bounced/complained
+    - Contact subscribed/unsubscribed
+    - Broadcast sent/opened/clicked
+    """
+    
+    body = await request.body()
+    signature = request.headers.get("x-resend-signature")
+    
+    # Verify webhook signature
+    expected_sig = hmac.new(
+        os.getenv("RESEND_WEBHOOK_SECRET").encode(),
+        body,
+        hashlib.sha256
+    ).hexdigest()
+    
+    if not hmac.compare_digest(signature, expected_sig):
+        return {"error": "Invalid signature"}, 401
+    
+    event = json.loads(body)
+    event_type = event["type"]
+    data = event["data"]
+    
+    # Handle each event type
+    if event_type == "email.opened":
+        # Track in your database
+        db.email_analytics.insert_one({
+            "email_id": data["email_id"],
+            "event": "opened",
+            "timestamp": datetime.now()
+        })
+        print(f"Email {data['email_id']} was opened")
+    
+    elif event_type == "email.clicked":
+        db.email_analytics.insert_one({
+            "email_id": data["email_id"],
+            "event": "clicked",
+            "url": data["url"],
+            "timestamp": datetime.now()
+        })
+        print(f"Link clicked in {data['email_id']}: {data['url']}")
+    
+    elif event_type == "email.bounced":
+        # Unsubscribe or flag for review
+        db.contacts.update_one(
+            {"email": data["email"]},
+            {"$set": {"status": "bounced", "bounce_reason": data["reason"]}}
+        )
+        print(f"Email {data['email']} bounced: {data['reason']}")
+    
+    elif event_type == "email.complained":
+        # Mark as spam complaint
+        db.contacts.update_one(
+            {"email": data["email"]},
+            {"$set": {"status": "complained"}}
+        )
+        print(f"Spam complaint from {data['email']}")
+    
+    elif event_type == "email.unsubscribed":
+        # Respect unsubscribe
+        db.contacts.update_one(
+            {"email": data["email"]},
+            {"$set": {"unsubscribed": True}}
+        )
+        print(f"{data['email']} unsubscribed")
+    
+    elif event_type == "broadcast.opened":
+        db.broadcast_analytics.insert_one({
+            "broadcast_id": data["broadcast_id"],
+            "email": data["email"],
+            "event": "opened",
+            "timestamp": datetime.now()
+        })
+    
+    # Always return 200 to acknowledge receipt
+    return {"received": True}
+```
+
+---
+
+## 🎨 Domains (Sender Verification)
+
+### Add Domain: POST `/domains`
+
+```json
+{
+  "domain": "mail.yourcompany.com"
+}
+```
+
+### Get Domain (with DNS Records): GET `/domains/{id}`
+
+Returns DNS records for verification:
+
+```json
+{
+  "id": "domain_abc123",
+  "domain": "mail.yourcompany.com",
+  "status": "unverified",
+  "created_at": "2025-01-15T10:30:00.000Z",
+  "records": [
+    {
+      "record": "DKIM",
+      "name": "_resend._domainkey.mail.yourcompany.com",
+      "type": "CNAME",
+      "value": "resend.example.com",
+      "status": "pending"
+    },
+    {
+      "record": "SPF",
+      "name": "mail.yourcompany.com",
+      "type": "TXT",
+      "value": "v=spf1 include:resend.com ~all",
+      "status": "pending"
+    },
+    {
+      "record": "DMARC",
+      "name": "_dmarc.mail.yourcompany.com",
+      "type": "TXT",
+      "value": "v=DMARC1; p=none",
+      "status": "pending"
+    }
+  ]
+}
+```
+
+### Verify Domain: POST `/domains/{id}/verify`
+
+Resend will check DNS records and confirm verification.
+
+---
+
+## 📊 Analytics Dashboard
+
+Create a real-time analytics dashboard by combining Resend data with your database.
+
+### FastAPI Analytics Endpoint
+
+```python
+@router.get("/api/admin/analytics/summary")
+async def analytics_summary(admin_key: str = Header(...)):
+    """Get combined analytics across all emails"""
+    
+    if admin_key != os.getenv("ADMIN_SECRET_KEY"):
+        raise HTTPException(status_code=401)
+    
+    # Get email stats from local database (populated by webhooks)
+    total_sent = db.email_logs.count_documents({})
+    total_opened = db.email_analytics.count_documents({"event": "opened"})
+    total_clicked = db.email_analytics.count_documents({"event": "clicked"})
+    total_bounced = db.contacts.count_documents({"status": "bounced"})
+    total_complained = db.contacts.count_documents({"status": "complained"})
+    total_unsubscribed = db.contacts.count_documents({"unsubscribed": True})
+    
+    return {
+        "total_sent": total_sent,
+        "total_opened": total_opened,
+        "open_rate": f"{(total_opened / total_sent * 100):.1f}%" if total_sent > 0 else "0%",
+        "total_clicked": total_clicked,
+        "click_rate": f"{(total_clicked / total_sent * 100):.1f}%" if total_sent > 0 else "0%",
+        "total_bounced": total_bounced,
+        "bounce_rate": f"{(total_bounced / total_sent * 100):.1f}%" if total_sent > 0 else "0%",
+        "total_complained": total_complained,
+        "complaint_rate": f"{(total_complained / total_sent * 100):.1f}%" if total_sent > 0 else "0%",
+        "total_unsubscribed": total_unsubscribed,
+        "unsubscribe_rate": f"{(total_unsubscribed / db.contacts.count_documents({})) * 100:.1f}%"
+    }
+```
+
+### React Analytics Dashboard
+
+```tsx
+// components/admin/AnalyticsDashboard.tsx
+import { useState, useEffect } from 'react';
+import { LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts';
+
+export default function AnalyticsDashboard() {
+  const [stats, setStats] = useState(null);
+  const [engagement, setEngagement] = useState([]);
+
+  useEffect(() => {
+    fetchAnalytics();
+  }, []);
+
+  const fetchAnalytics = async () => {
+    const res = await fetch('/api/admin/analytics/summary', {
+      headers: { 'Authorization': `Bearer ${adminToken}` }
+    });
+    setStats(await res.json());
+
+    // Get engagement timeline
+    const engRes = await fetch('/api/admin/analytics/engagement-timeline', {
+      headers: { 'Authorization': `Bearer ${adminToken}` }
+    });
+    setEngagement(await engRes.json());
+  };
+
+  if (!stats) return <div>Loading...</div>;
+
+  return (
+    <div className="analytics-dashboard">
+      <h2>Email Analytics</h2>
+      
+      <div className="metrics-grid">
+        <MetricCard label="Emails Sent" value={stats.total_sent} />
+        <MetricCard label="Open Rate" value={stats.open_rate} color="blue" />
+        <MetricCard label="Click Rate" value={stats.click_rate} color="green" />
+        <MetricCard label="Bounce Rate" value={stats.bounce_rate} color="red" />
+      </div>
+
+      <div className="chart">
+        <h3>Engagement Over Time</h3>
+        <LineChart data={engagement} width={800} height={300}>
+          <XAxis dataKey="date" />
+          <YAxis />
+          <Tooltip />
+          <Line type="monotone" dataKey="opened" stroke="#3b82f6" />
+          <Line type="monotone" dataKey="clicked" stroke="#10b981" />
+        </LineChart>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 🛡️ Admin Authorization & Audit Logs
+
+### Admin Endpoint Protection Pattern
+
+All admin endpoints require Bearer token verification:
+
+```python
+def require_admin(admin_key: str = Header(...)):
+    if admin_key != os.getenv("ADMIN_SECRET_KEY"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return True
+
+@router.post("/api/admin/campaigns/create")
+async def create_campaign(..., admin: bool = Depends(require_admin)):
+    # Only admins can access
+    pass
+```
+
+### Audit Trail
+
+Log every admin action:
+
+```python
+def log_admin_action(action: str, resource: str, admin_key: str, details: dict):
+    db.audit_logs.insert_one({
+        "action": action,
+        "resource": resource,
+        "admin": admin_key,
+        "timestamp": datetime.now(),
+        "details": details,
+        "ip_address": request.client.host
+    })
+```
+
+---
+
+## 🧪 Testing & Sandboxing
+
+### Resend Testing Domain
+
+For development, use Resend's testing domain without verification:
+
+```python
+# Development/Testing
+from_address = "noreply@onboarding.resend.dev"  # No verification needed
+
+# Production
+from_address = "noreply@yourdomain.com"  # Must be verified
+```
+
+### Error Handling Strategy
+
+```python
+async def call_resend_with_retry(endpoint: str, method: str, payload: dict, retries: int = 3):
+    """Robust Resend API wrapper with retry logic"""
+    
+    for attempt in range(retries):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                if method == "POST":
+                    resp = await client.post(
+                        f"https://api.resend.com{endpoint}",
+                        json=payload,
+                        headers={"Authorization": f"Bearer {RESEND_KEY}"}
+                    )
+                elif method == "GET":
+                    resp = await client.get(
+                        f"https://api.resend.com{endpoint}",
+                        headers={"Authorization": f"Bearer {RESEND_KEY}"}
+                    )
+                
+                if resp.status_code == 429:  # Rate limited
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                    continue
+                
+                if resp.status_code >= 500:  # Server error
+                    await asyncio.sleep(1)
+                    continue
+                
+                if resp.status_code < 400:
+                    return resp.json()
+                
+                raise HTTPException(
+                    status_code=resp.status_code,
+                    detail=resp.json().get("message", "API error")
+                )
+        
+        except httpx.TimeoutException:
+            if attempt == retries - 1:
+                raise HTTPException(status_code=504, detail="Resend API timeout")
+            await asyncio.sleep(1)
+    
+    raise HTTPException(status_code=503, detail="Resend API unavailable")
+```
+
+---
+
+## 🚀 Deployment Checklist
+
+- [ ] Set `RESEND_API_KEY` environment variable (from https://resend.com/api-keys)
+- [ ] Set `SENDER_DOMAIN` to verified domain (e.g., `noreply@yourdomain.com`)
+- [ ] Create webhook endpoint and configure in Resend API (or POST `/webhooks`)
+- [ ] Set `RESEND_WEBHOOK_SECRET` from webhook response
+- [ ] Test all endpoints with Resend testing domain first
+- [ ] Verify custom domain in Resend
+- [ ] Deploy admin dashboard (Vercel/Netlify)
+- [ ] Deploy FastAPI backend (Railway/Render/AWS)
+- [ ] Test end-to-end: signup → contact created → email sent → webhook received
+- [ ] Monitor error rates and performance
+
+---
+
+## 📚 Complete Feature Checklist
+
+### Email Sending
+- [x] Send single transactional emails
+- [x] Batch email sending
+- [x] Attachments support
+- [x] Custom headers
+- [x] Idempotency keys (prevent duplicates)
+- [x] Tagging for organization
+
+### Contact Management
+- [x] Create contacts with custom properties
+- [x] List/search contacts
+- [x] Update contact info & subscription status
+- [x] Delete contacts
+- [x] Bulk import contacts
+
+### Audiences/Segments
+- [x] Create audience segments
+- [x] Add/remove contacts from audiences
+- [x] List audience members
+- [x] Track audience size
+
+### Broadcasts (Campaigns)
+- [x] Create broadcast with templates
+- [x] Dynamic content personalization ({{first_name}}, etc.)
+- [x] Schedule broadcasts
+- [x] Send immediately
+- [x] Track open rates
+- [x] Track click rates
+- [x] Unsubscribe handling
+
+### Templates
+- [x] Create email templates
+- [x] Update templates
+- [x] Publish template versions
+- [x] Delete old templates
+- [x] Use templates in broadcasts
+
+### Webhooks
+- [x] Listen to 15+ event types
+- [x] Verify webhook signatures
+- [x] Track email opens
+- [x] Track link clicks
+- [x] Handle bounces
+- [x] Handle complaints
+- [x] Handle unsubscribes
+
+### Domains
+- [x] Add custom sender domain
+- [x] Get DNS verification records
+- [x] Verify domain ownership
+
+### Analytics
+- [x] Email sent count
+- [x] Open rate tracking
+- [x] Click rate tracking
+- [x] Bounce tracking
+- [x] Complaint tracking
+- [x] Unsubscribe tracking
+- [x] Engagement timeline
+
+### Admin Features
+- [x] Protected admin endpoints (Bearer token)
+- [x] Admin audit logs
+- [x] Contact management UI
+- [x] Campaign builder UI
+- [x] Analytics dashboard
+- [x] Audience/segment management
+- [x] CSV import/export
+
+---
+
+## 💡 Example: Complete Email Flow
+
+**Step 1: Admin creates contact via UI**
+
+```
+POST /api/admin/contacts/create
+→ Backend calls POST /contacts (Resend)
+→ Contact created in Resend
+→ Stored in local database
+```
+
+**Step 2: Admin creates audience**
+
+```
+POST /api/admin/audiences/create
+→ Backend calls POST /audiences (Resend)
+→ Audience created in Resend
+```
+
+**Step 3: Admin adds contacts to audience**
+
+```
+POST /api/admin/audiences/{id}/add-contacts
+→ Backend calls POST /audiences/{id}/contacts (Resend) in bulk
+→ Contacts linked to audience
+```
+
+**Step 4: Admin creates broadcast campaign**
+
+```
+POST /api/admin/campaigns/create
+→ Backend calls POST /broadcasts (Resend)
+→ Draft broadcast stored in Resend
+→ Campaign stored in local database
+```
+
+**Step 5: Admin sends campaign**
+
+```
+POST /api/admin/campaigns/{id}/send
+→ Backend calls POST /broadcasts/{id}/send (Resend)
+→ Emails sent to all audience members
+→ Status updated to "sending"
+```
+
+**Step 6: Webhooks fire as emails are opened/clicked**
+
+```
+Resend sends webhook to your endpoint
+→ POST /api/webhooks/resend
+→ Verify signature
+→ Extract event (opened, clicked, bounced, etc.)
+→ Store in analytics database
+→ Dashboard updates in real-time
+```
+
+**Step 7: Admin views analytics**
+
+```
+GET /api/admin/analytics/summary
+→ Query local analytics database
+→ Calculate rates (open_rate = opened/sent * 100)
+→ Return to dashboard
+→ Display in charts & tables
+```
+
+---
+
+## 🎓 What Your AI Agent Needs to Know
+
+1. **Resend is API-first** — everything the dashboard can do, the API can do
+2. **Bearer token authentication** — all requests need `Authorization: Bearer re_xxx`
+3. **Webhooks are your real-time data source** — rely on them for opens/clicks/bounces
+4. **Contacts are global** — one contact can be in multiple audiences
+5. **Broadcasts use dynamic content** — {{first_name}} gets replaced per contact
+6. **Rate limits exist** — 10 requests/second per team, implement retry logic
+7. **Idempotency keys prevent duplicates** — use UUID for same email sent twice
+8. **Custom properties are powerful** — store any JSON on contacts and use in templates
+9. **Unsubscribe is automatic** — Resend handles GDPR/CAN-SPAM for you
+10. **Never store API key in code** — always use environment variables
+
+---
+
+Good luck building! You now own your entire email infrastructure. 🚀

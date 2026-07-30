@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     # Must be set from the deployment secret store when admin-secret endpoints are enabled.
     FASTAPI_SECRET_KEY: str = ""
     ADMIN_EMAIL: str = "talikotibasavaraj77@gmail.com"
+    # Comma-separated accounts with unrestricted founder/admin product access.
+    FULL_ACCESS_EMAILS: str = "talikotibasavaraj77@gmail.com"
 
     # Google Cloud Storage
     GCS_BUCKET_NAME: str = ""
@@ -79,10 +81,25 @@ class Settings(BaseSettings):
     ADAPTIVE_WEIGHT_MIN: float = 0.75
     ADAPTIVE_WEIGHT_MAX: float = 2.0
 
+    # Behavioral Intelligence Layer
+    BEHAVIORAL_SIGNALS_ENABLED: bool = True
+    BEHAVIORAL_SCORE_BLEND_WEIGHT: float = 0.15
+    BEHAVIORAL_WEIGHT_INTENT: float = 0.30
+    BEHAVIORAL_WEIGHT_AUTHORITY: float = 0.20
+    BEHAVIORAL_WEIGHT_TRUST: float = 0.15
+    BEHAVIORAL_WEIGHT_URGENCY: float = 0.20
+    BEHAVIORAL_WEIGHT_MOMENTUM: float = 0.10
+    BEHAVIORAL_WEIGHT_FRICTION: float = -0.15
+    BEHAVIORAL_NOTES_NLP_ENABLED: bool = False
+
     @property
     def cors_origins_list(self) -> List[str]:
         """Parse comma-separated CORS origins into a list."""
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
+
+    @property
+    def full_access_emails(self) -> List[str]:
+        return [email.strip().casefold() for email in self.FULL_ACCESS_EMAILS.split(",") if email.strip()]
 
     @property
     def is_production(self) -> bool:

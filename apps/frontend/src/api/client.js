@@ -133,6 +133,16 @@ export const scoringApi = {
     return response.data;
   },
 
+  listRankedLists: async () => {
+    const response = await client.get('/ranked-lists');
+    return response.data;
+  },
+
+  getRankedList: async (runId) => {
+    const response = await client.get(`/ranked-lists/${encodeURIComponent(runId)}`);
+    return response.data;
+  },
+
   feedback: async (modelName, file, outcomeColumn = null, autoRetrain = false, feedbackWeight = 2) => {
     const formData = new FormData();
     formData.append('file', file);
